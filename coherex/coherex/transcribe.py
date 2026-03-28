@@ -35,6 +35,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
     language: str = args.pop("language")
     hf_token: str = args.pop("hf_token")
     vad_method: str = args.pop("vad_method")
+    vad_model_dir: str = args.pop("vad_model_dir")
     vad_onset: float = args.pop("vad_onset")
     vad_offset: float = args.pop("vad_offset")
     chunk_size: float = args.pop("chunk_size")
@@ -61,7 +62,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
         compute_type=compute_type,
         language=language,
         vad_method=vad_method,
-        vad_options={"vad_onset": vad_onset, "vad_offset": vad_offset},
+        vad_options={"vad_onset": vad_onset, "vad_offset": vad_offset, "model_dir": vad_model_dir},
         asr_options={
             "punctuation": not no_punctuation,
             "suppress_numerals": suppress_numerals,

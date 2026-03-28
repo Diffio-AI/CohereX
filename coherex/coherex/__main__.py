@@ -43,7 +43,8 @@ def cli():
     parser.add_argument("--no_align", action="store_true", help="do not perform phoneme alignment")
     parser.add_argument("--return_char_alignments", action="store_true", help="return character-level alignments in JSON output")
 
-    parser.add_argument("--vad_method", type=str, default="pyannote", choices=["pyannote", "none"], help="voice activity detection method")
+    parser.add_argument("--vad_method", type=str, default="pyannote", choices=["pyannote", "firered", "none"], help="voice activity detection method")
+    parser.add_argument("--vad_model_dir", type=str, default=None, help="optional model directory for the selected VAD backend")
     parser.add_argument("--vad_onset", type=float, default=0.500, help="onset threshold for VAD")
     parser.add_argument("--vad_offset", type=float, default=0.363, help="offset threshold for VAD")
     parser.add_argument("--chunk_size", type=float, default=35.0, help="maximum trimmed speech duration per ASR chunk")

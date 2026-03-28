@@ -95,6 +95,10 @@ def _segments_from_vad(scores, onset: float, offset: Optional[float]) -> List[Sp
     return [SpeechSpan(turn.start, turn.end) for turn in speech.get_timeline()]
 
 
+def _segments_from_firered(result: dict) -> List[SpeechSpan]:
+    return [SpeechSpan(start, end) for start, end in result.get("timestamps", [])]
+
+
 def _split_oversized_span(
     audio: np.ndarray,
     span: SpeechSpan,
@@ -225,12 +229,15 @@ class CohereTranscriptionPipeline:
         if isinstance(self.vad_model, NullVad):
             speech_spans = [SpeechSpan(0.0, len(audio) / SAMPLE_RATE)]
         else:
-            vad_scores = self.vad_model({"waveform": waveform, "sample_rate": SAMPLE_RATE})
-            speech_spans = _segments_from_vad(
-                vad_scores,
-                onset=self.vad_params["vad_onset"],
-                offset=self.vad_params["vad_offset"],
-            )
+            vad_output = self.vad_model({"waveform": waveform, "sample_rate": SAMPLE_RATE})
+            if isinstance(vad_output, dict) and "timestamps" in vad_output:
+                speech_spans = _segments_from_firered(vad_output)
+            else:
+                speech_spans = _segments_from_vad(
+                    vad_output,
+                    onset=self.vad_params["vad_onset"],
+                    offset=self.vad_params["vad_offset"],
+                )
         if not speech_spans:
             logger.warning("No active speech found in audio")
             return {"segments": [], "language": self.language}
@@ -414,6 +421,7 @@ def load_model(
     default_vad_options = {
         "vad_onset": 0.500,
         "vad_offset": 0.363,
+        "model_dir": None,
     }
     if vad_options is not None:
         default_vad_options.update(vad_options)
@@ -424,6 +432,16 @@ def load_model(
         from coherex.vads.pyannote import Pyannote
 
         vad_model = Pyannote(device=torch_device, token=use_auth_token, **default_vad_options)
+    elif vad_method == "firered":
+        from coherex.vads.firered import FireRed
+
+        vad_model = FireRed(
+            device=torch_device,
+            token=use_auth_token,
+            cache_dir=download_root,
+            local_files_only=local_files_only,
+            **default_vad_options,
+        )
     else:
         raise ValueError(f"Unsupported vad_method: {vad_method}")
 
