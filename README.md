@@ -60,10 +60,10 @@ CohereX includes a robust language identification step before transcription. We 
 
 ```bash
 # Sync the CohereX project environment from the repo root
-uv sync --project coherex --extra dev
+uv sync --extra dev
 ```
 
-This project keeps its Python package metadata in [`coherex/pyproject.toml`](/home/nharmon/git/data_utils_v2/cohereX/coherex/pyproject.toml), so `--project coherex` tells `uv` which package to run.
+The project metadata lives in [`pyproject.toml`](/home/nharmon/git/data_utils_v2/CohereX/pyproject.toml), so you can run `uv` commands directly from the repository root.
 
 ---
 
@@ -72,7 +72,7 @@ This project keeps its Python package metadata in [`coherex/pyproject.toml`](/ho
 You can run CohereX directly with `uv` from the repository root:
 
 ```bash
-uv run --project coherex coherex audio.mp3
+uv run coherex audio.mp3
 ```
 
 **Common Options:**
@@ -88,7 +88,7 @@ uv run --project coherex coherex audio.mp3
 CohereX can be easily integrated into your Python applications with extensive configuration options:
 
 ```bash
-PYTHONPATH=coherex uv run --project coherex python
+uv run python
 ```
 
 ```python
@@ -150,7 +150,7 @@ print(result["segments"])
 After changing `coherex`, run the required regression suite:
 
 ```bash
-PYTHONPATH=coherex COHEREX_TEST_DEVICE=cpu uv run --project coherex pytest -q coherex/tests/test_regression_transcripts.py coherex/tests/test_regression_word_alignment.py
+COHEREX_TEST_DEVICE=cpu uv run pytest -q tests/test_regression_transcripts.py tests/test_regression_word_alignment.py
 ```
 
 ---
