@@ -3,7 +3,7 @@
 **Accurate Word-Level Timestamps and VAD Preprocessing for Cohere ASR**  
 *By [Diffio.ai - Audio Restoration](https://diffio.ai)* | *Written by Codex*
 
-CohereX provides fast, highly accurate speech recognition by combining Cohere's state-of-the-art ASR model with robust Voice Activity Detection (VAD) and forced phoneme alignment. Inspired by WhisperX, this library is designed for ease of use and production-ready audio transcription.
+CohereX provides fast, highly accurate speech recognition by combining Cohere's state-of-the-art ASR model with robust Voice Activity Detection (VAD) and forced phoneme alignment. Inspired by WhisperX, it is designed as a drop-in replacement that uses the same interface and outputs as WhisperX.
 
 **Benchmarks:**
 
