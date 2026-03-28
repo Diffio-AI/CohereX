@@ -1,13 +1,13 @@
 # CohereX
 
 **Accurate Word-Level Timestamps and VAD Preprocessing for Cohere ASR**  
-*By [Diffio.ai - Audio Restoration](https://diffio.ai)*
+*By [Diffio.ai - Audio Restoration](https://diffio.ai)* | *Written by Codex*
 
 CohereX provides fast, highly accurate speech recognition by combining Cohere's state-of-the-art ASR model with robust Voice Activity Detection (VAD) and forced phoneme alignment. Inspired by WhisperX, this library is designed for ease of use and production-ready audio transcription.
 
 **Benchmarks:**
 
-*(Tested with batch size 8 on an RTX 6000 Ada GPU)*
+*(Tested on a 48 min 28 sec audio file with batch size 8 on an RTX 6000 Ada GPU)*
 
 | System | VAD+ASR | Total | Speed |
 |---|---:|---:|---:|
@@ -88,7 +88,7 @@ uv run --project coherex coherex audio.mp3
 CohereX can be easily integrated into your Python applications with extensive configuration options:
 
 ```bash
-uv run --project coherex python
+PYTHONPATH=coherex uv run --project coherex python
 ```
 
 ```python
