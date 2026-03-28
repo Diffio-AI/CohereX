@@ -4,6 +4,7 @@ C. Max Bain
 """
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from typing import Iterable, Optional, Union, List
 
@@ -17,6 +18,7 @@ sys.modules.setdefault("keras", None)
 
 import numpy as np
 import pandas as pd
+import soundfile as sf
 import torch
 import torchaudio
 from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
@@ -52,6 +54,9 @@ QWEN3_SUPPORTED_LANGUAGE_NAMES = {
     "pt": "Portuguese",
     "ru": "Russian",
     "es": "Spanish",
+}
+NEMO_DEFAULT_ALIGN_MODELS = {
+    "en": "stt_en_fastconformer_hybrid_large_pc",
 }
 
 DEFAULT_ALIGN_MODELS_TORCH = {
@@ -113,6 +118,22 @@ def _infer_align_backend(model_name: Optional[str], backend: str) -> str:
     if model_name is not None and "qwen3-forcedaligner" in model_name.lower().replace("_", "-"):
         return "qwen3"
     return backend
+
+
+def _build_fallback_segment(
+    segment: SingleSegment,
+    return_char_alignments: bool = False,
+) -> SingleAlignedSegment:
+    aligned_seg: SingleAlignedSegment = {
+        "start": segment["start"],
+        "end": segment["end"],
+        "text": segment["text"],
+        "words": [],
+        "chars": [] if return_char_alignments else None,
+    }
+    if "avg_logprob" in segment:
+        aligned_seg["avg_logprob"] = segment["avg_logprob"]
+    return aligned_seg
 
 
 def _qwen_supported_language_codes() -> str:
@@ -205,31 +226,17 @@ def _align_with_qwen3(
 
         if group_start >= max_duration:
             for segment in group:
-                fallback_segment: SingleAlignedSegment = {
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "text": segment["text"],
-                    "words": [],
-                    "chars": [] if return_char_alignments else None,
-                }
-                if "avg_logprob" in segment:
-                    fallback_segment["avg_logprob"] = segment["avg_logprob"]
-                aligned_segments.append(fallback_segment)
+                aligned_segments.append(
+                    _build_fallback_segment(segment, return_char_alignments=return_char_alignments)
+                )
             continue
 
         combined_text = _build_qwen_window_text(group, model_lang)
         if not combined_text:
             for segment in group:
-                fallback_segment = {
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "text": segment["text"],
-                    "words": [],
-                    "chars": [] if return_char_alignments else None,
-                }
-                if "avg_logprob" in segment:
-                    fallback_segment["avg_logprob"] = segment["avg_logprob"]
-                aligned_segments.append(fallback_segment)
+                aligned_segments.append(
+                    _build_fallback_segment(segment, return_char_alignments=return_char_alignments)
+                )
             continue
 
         f1 = int(group_start * SAMPLE_RATE)
@@ -262,16 +269,9 @@ def _align_with_qwen3(
                 len(aligned_items),
             )
             for segment in group:
-                fallback_segment = {
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "text": segment["text"],
-                    "words": [],
-                    "chars": [] if return_char_alignments else None,
-                }
-                if "avg_logprob" in segment:
-                    fallback_segment["avg_logprob"] = segment["avg_logprob"]
-                aligned_segments.append(fallback_segment)
+                aligned_segments.append(
+                    _build_fallback_segment(segment, return_char_alignments=return_char_alignments)
+                )
             continue
 
         item_offset = 0
@@ -304,6 +304,226 @@ def _align_with_qwen3(
         word_segments += segment["words"]
 
     return {"segments": aligned_segments, "word_segments": word_segments}
+
+
+def _load_nemo_align_model(
+    model_name: str,
+    resolved_device: torch.device,
+):
+    try:
+        from omegaconf import OmegaConf
+        from nemo.collections.asr.models.ctc_models import EncDecCTCModel
+        from nemo.collections.asr.models.hybrid_rnnt_ctc_models import EncDecHybridRNNTCTCModel
+        from nemo.collections.asr.parts.utils.transcribe_utils import setup_model
+    except ImportError as exc:
+        raise ImportError(
+            "NeMo forced alignment requires the optional NeMo ASR dependencies. "
+            "Install them with `pip install 'nemo-toolkit[core,asr-only,common-only]>=2.5.0,<3.0.0'`, "
+            "`uv pip install 'nemo-toolkit[core,asr-only,common-only]>=2.5.0,<3.0.0'`, "
+            "or sync the project with `uv sync --extra nemo`."
+        ) from exc
+
+    cfg = OmegaConf.create(
+        {
+            "pretrained_name": None if os.path.exists(model_name) else model_name,
+            "model_path": model_name if os.path.exists(model_name) else None,
+        }
+    )
+    align_model, _ = setup_model(cfg, resolved_device)
+    align_model.eval()
+
+    if isinstance(align_model, EncDecHybridRNNTCTCModel):
+        align_model.change_decoding_strategy(decoder_type="ctc")
+
+    if hasattr(align_model, "change_attention_model"):
+        try:
+            align_model.change_attention_model(
+                self_attention_model="rel_pos_local_attn",
+                att_context_size=[64, 64],
+            )
+        except Exception:
+            logger.debug("Failed to switch NeMo aligner to local attention; continuing with model defaults.")
+
+    if not isinstance(align_model, (EncDecCTCModel, EncDecHybridRNNTCTCModel)):
+        raise NotImplementedError(
+            "NeMo forced alignment currently supports only EncDecCTCModel and "
+            "EncDecHybridRNNTCTCModel checkpoints."
+        )
+
+    return align_model
+
+
+def _get_nemo_alignment_utils():
+    try:
+        from nemo.collections.asr.parts.utils.aligner_utils import (
+            add_t_start_end_to_utt_obj,
+            get_batch_variables,
+            viterbi_decoding,
+        )
+    except ImportError as exc:
+        raise ImportError(
+            "NeMo forced alignment utilities are unavailable. "
+            "Install the optional NeMo extra with `uv sync --extra nemo`."
+        ) from exc
+
+    return add_t_start_end_to_utt_obj, get_batch_variables, viterbi_decoding
+
+
+def _convert_nemo_utt_obj_to_segment(
+    source_segment: SingleSegment,
+    utt_obj,
+    offset_sec: float,
+    return_char_alignments: bool = False,
+) -> SingleAlignedSegment:
+    words: List[SingleWordSegment] = []
+
+    for segment_or_token in getattr(utt_obj, "segments_and_tokens", []):
+        if not hasattr(segment_or_token, "words_and_tokens"):
+            continue
+        for word_or_token in segment_or_token.words_and_tokens:
+            if not hasattr(word_or_token, "tokens"):
+                continue
+            if word_or_token.t_start is None or word_or_token.t_end is None:
+                continue
+            if word_or_token.t_start < 0 or word_or_token.t_end < 0:
+                continue
+            words.append(
+                {
+                    "word": word_or_token.text,
+                    "start": round(word_or_token.t_start + offset_sec, 3),
+                    "end": round(word_or_token.t_end + offset_sec, 3),
+                    "score": 1.0,
+                }
+            )
+
+    aligned_segment: SingleAlignedSegment = {
+        "start": words[0]["start"] if words else source_segment["start"],
+        "end": words[-1]["end"] if words else source_segment["end"],
+        "text": source_segment["text"],
+        "words": words,
+        "chars": [] if return_char_alignments else None,
+    }
+    if "avg_logprob" in source_segment:
+        aligned_segment["avg_logprob"] = source_segment["avg_logprob"]
+    return aligned_segment
+
+
+def _align_with_nemo(
+    transcript: Iterable[SingleSegment],
+    model,
+    align_model_metadata: dict,
+    audio: torch.Tensor,
+    resolved_device: torch.device,
+    return_char_alignments: bool = False,
+) -> AlignedTranscriptionResult:
+    if return_char_alignments:
+        logger.warning(
+            "NeMo forced alignment does not expose WhisperX-style character alignments; "
+            "returning empty char lists."
+        )
+
+    add_t_start_end_to_utt_obj, get_batch_variables, viterbi_decoding = _get_nemo_alignment_utils()
+
+    transcript = list(transcript)
+    max_duration = audio.shape[1] / SAMPLE_RATE
+    aligned_segments: List[Optional[SingleAlignedSegment]] = [None] * len(transcript)
+    jobs = []
+
+    with tempfile.TemporaryDirectory(prefix="coherex-nemo-align-") as tmpdir:
+        for idx, segment in enumerate(transcript):
+            t1 = segment["start"]
+            t2 = segment["end"]
+
+            if not segment["text"].strip():
+                aligned_segments[idx] = _build_fallback_segment(
+                    segment, return_char_alignments=return_char_alignments
+                )
+                continue
+
+            if t1 >= max_duration or t2 <= t1:
+                aligned_segments[idx] = _build_fallback_segment(
+                    segment, return_char_alignments=return_char_alignments
+                )
+                continue
+
+            f1 = int(t1 * SAMPLE_RATE)
+            f2 = int(min(t2, max_duration) * SAMPLE_RATE)
+            waveform_segment = audio[:, f1:f2].squeeze(0).cpu().numpy()
+            if waveform_segment.size == 0:
+                aligned_segments[idx] = _build_fallback_segment(
+                    segment, return_char_alignments=return_char_alignments
+                )
+                continue
+
+            audio_path = os.path.join(tmpdir, f"segment_{idx}.wav")
+            sf.write(audio_path, waveform_segment, SAMPLE_RATE)
+            jobs.append(
+                {
+                    "index": idx,
+                    "segment": segment,
+                    "audio_path": audio_path,
+                    "start": t1,
+                }
+            )
+
+        output_timestep_duration = None
+        batch_size = max(1, int(align_model_metadata.get("batch_size", 1)))
+
+        for batch_start in range(0, len(jobs), batch_size):
+            batch_jobs = jobs[batch_start:batch_start + batch_size]
+            (
+                log_probs_batch,
+                y_batch,
+                T_batch,
+                U_batch,
+                utt_obj_batch,
+                output_timestep_duration,
+            ) = get_batch_variables(
+                audio=[job["audio_path"] for job in batch_jobs],
+                model=model,
+                segment_separators=None,
+                word_separator=" ",
+                align_using_pred_text=False,
+                audio_filepath_parts_in_utt_id=1,
+                gt_text_batch=[job["segment"]["text"] for job in batch_jobs],
+                output_timestep_duration=output_timestep_duration,
+            )
+
+            alignments_batch = viterbi_decoding(
+                log_probs_batch,
+                y_batch,
+                T_batch,
+                U_batch,
+                viterbi_device=resolved_device,
+            )
+
+            for job, utt_obj, alignment_utt in zip(batch_jobs, utt_obj_batch, alignments_batch):
+                if not getattr(utt_obj, "segments_and_tokens", None):
+                    aligned_segments[job["index"]] = _build_fallback_segment(
+                        job["segment"],
+                        return_char_alignments=return_char_alignments,
+                    )
+                    continue
+
+                utt_obj = add_t_start_end_to_utt_obj(
+                    utt_obj,
+                    alignment_utt,
+                    output_timestep_duration,
+                )
+                aligned_segment = _convert_nemo_utt_obj_to_segment(
+                    source_segment=job["segment"],
+                    utt_obj=utt_obj,
+                    offset_sec=job["start"],
+                    return_char_alignments=return_char_alignments,
+                )
+                aligned_segments[job["index"]] = aligned_segment
+
+    word_segments: List[SingleWordSegment] = []
+    final_segments = [segment for segment in aligned_segments if segment is not None]
+    for segment in final_segments:
+        word_segments += segment["words"]
+
+    return {"segments": final_segments, "word_segments": word_segments}
 
 
 def load_align_model(
@@ -343,6 +563,34 @@ def load_align_model(
             "language_name": language_name,
             "dictionary": None,
             "type": "qwen3",
+        }
+        return align_model, align_metadata
+
+    if backend == "nemo":
+        if model_name is None:
+            if language_code not in NEMO_DEFAULT_ALIGN_MODELS:
+                raise ValueError(
+                    "No default NeMo align-model for language: "
+                    f"{language_code}. Pass a NeMo CTC or hybrid CTC checkpoint via --align_model."
+                )
+            model_name = NEMO_DEFAULT_ALIGN_MODELS[language_code]
+
+        if model_cache_only and not os.path.exists(model_name):
+            raise ValueError(
+                "NeMo forced alignment does not support cache-only loading by model name. "
+                "Pass a local `.nemo` model path or disable --model_cache_only."
+            )
+
+        align_model = _load_nemo_align_model(
+            model_name=model_name,
+            resolved_device=resolved_device,
+        )
+        align_metadata = {
+            "language": language_code,
+            "dictionary": None,
+            "type": "nemo",
+            "batch_size": 1,
+            "model_name": model_name,
         }
         return align_model, align_metadata
 
@@ -416,6 +664,15 @@ def align(
             model=model,
             align_model_metadata=align_model_metadata,
             audio=audio,
+            return_char_alignments=return_char_alignments,
+        )
+    if align_model_metadata["type"] == "nemo":
+        return _align_with_nemo(
+            transcript=transcript,
+            model=model,
+            align_model_metadata=align_model_metadata,
+            audio=audio,
+            resolved_device=resolved_device,
             return_char_alignments=return_char_alignments,
         )
 

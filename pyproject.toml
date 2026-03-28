@@ -30,6 +30,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest"]
 qwen = ["qwen-asr>=0.0.6,<0.1.0"]
+nemo = ["nemo-toolkit[core,asr-only,common-only]>=2.5.0,<3.0.0"]
 
 [project.scripts]
 coherex = "coherex.__main__:cli"
