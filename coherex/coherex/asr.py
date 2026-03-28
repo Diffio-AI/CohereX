@@ -65,8 +65,8 @@ def find_numeral_symbol_tokens(tokenizer: CohereAsrTokenizer) -> List[int]:
     for token_id in sorted(set(tokenizer.get_vocab().values())):
         if token_id in special_ids:
             continue
-        token = tokenizer.convert_ids_to_tokens(token_id)
-        token = token.removeprefix("▁")
+        token = tokenizer.decode([token_id], skip_special_tokens=False)
+        token = token.removeprefix(" ")
         if any(char in "0123456789%$£" for char in token):
             numeral_symbol_tokens.append(token_id)
     return numeral_symbol_tokens

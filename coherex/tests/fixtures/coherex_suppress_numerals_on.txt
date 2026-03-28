@@ -1,0 +1,1 @@
+This is a regression test for cohere transcription. We are going to see if we can suppress numerals: one, two, three, four, five, six, one hundred, one hundred and twenty-eight, five hundred thousand, one K, nineteen twenty-four, nineteen forty-eight, nineteen forty-one, eighteen fifty-three. This has been a regression test.
