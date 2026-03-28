@@ -464,7 +464,7 @@ def load_model(
     language: Optional[str] = None,
     lid_method: str = "speechbrain",
     lid_options: Optional[dict] = None,
-    vad_method: str = "pyannote",
+    vad_method: str = "firered",
     vad_options: Optional[dict] = None,
     download_root: Optional[str] = None,
     local_files_only: bool = False,

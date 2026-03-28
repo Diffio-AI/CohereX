@@ -86,7 +86,23 @@ DEFAULT_ALIGN_MODELS_HF = {
 }
 
 
-def load_align_model(language_code: str, device: str, model_name: Optional[str] = None, model_dir=None, model_cache_only: bool = False):
+def _resolve_device(device: Union[str, torch.device], device_index: int = 0) -> torch.device:
+    if isinstance(device, torch.device):
+        return device
+    if device == "cuda":
+        return torch.device(f"cuda:{device_index}")
+    return torch.device(device)
+
+
+def load_align_model(
+    language_code: str,
+    device: Union[str, torch.device],
+    model_name: Optional[str] = None,
+    model_dir=None,
+    model_cache_only: bool = False,
+    device_index: int = 0,
+):
+    resolved_device = _resolve_device(device, device_index=device_index)
     if model_name is None:
         # use default model
         if language_code in DEFAULT_ALIGN_MODELS_TORCH:
@@ -102,7 +118,7 @@ def load_align_model(language_code: str, device: str, model_name: Optional[str] 
     if model_name in torchaudio.pipelines.__all__:
         pipeline_type = "torchaudio"
         bundle = torchaudio.pipelines.__dict__[model_name]
-        align_model = bundle.get_model(dl_kwargs={"model_dir": model_dir}).to(device)
+        align_model = bundle.get_model(dl_kwargs={"model_dir": model_dir}).to(resolved_device)
         labels = bundle.get_labels()
         align_dictionary = {c.lower(): i for i, c in enumerate(labels)}
     else:
@@ -114,7 +130,7 @@ def load_align_model(language_code: str, device: str, model_name: Optional[str] 
             print(f"Error loading model from huggingface, check https://huggingface.co/models for finetuned wav2vec2.0 models")
             raise ValueError(f'The chosen align_model "{model_name}" could not be found in huggingface (https://huggingface.co/models) or torchaudio (https://pytorch.org/audio/stable/pipelines.html#id14)')
         pipeline_type = "huggingface"
-        align_model = align_model.to(device)
+        align_model = align_model.to(resolved_device)
         labels = processor.tokenizer.get_vocab()
         align_dictionary = {char.lower(): code for char,code in processor.tokenizer.get_vocab().items()}
 
@@ -128,12 +144,13 @@ def align(
     model: torch.nn.Module,
     align_model_metadata: dict,
     audio: Union[str, np.ndarray, torch.Tensor],
-    device: str,
+    device: Union[str, torch.device],
     interpolate_method: str = "nearest",
     return_char_alignments: bool = False,
     print_progress: bool = False,
     combined_progress: bool = False,
     progress_callback: ProgressCallback = None,
+    device_index: int = 0,
 ) -> AlignedTranscriptionResult:
     """
     Align phoneme recognition predictions to known transcription.
@@ -145,6 +162,7 @@ def align(
         audio = torch.from_numpy(audio)
     if len(audio.shape) == 1:
         audio = audio.unsqueeze(0)
+    resolved_device = _resolve_device(device, device_index=device_index)
 
     MAX_DURATION = audio.shape[1] / SAMPLE_RATE
 
@@ -255,7 +273,7 @@ def align(
         waveform_segment = audio[:, f1:f2]
         # Handle the minimum input length for wav2vec2 models
         if waveform_segment.shape[-1] < 400:
-            lengths = torch.as_tensor([waveform_segment.shape[-1]]).to(device)
+            lengths = torch.as_tensor([waveform_segment.shape[-1]]).to(resolved_device)
             waveform_segment = torch.nn.functional.pad(
                 waveform_segment, (0, 400 - waveform_segment.shape[-1])
             )
@@ -264,9 +282,9 @@ def align(
 
         with torch.inference_mode():
             if model_type == "torchaudio":
-                emissions, _ = model(waveform_segment.to(device), lengths=lengths)
+                emissions, _ = model(waveform_segment.to(resolved_device), lengths=lengths)
             elif model_type == "huggingface":
-                emissions = model(waveform_segment.to(device)).logits
+                emissions = model(waveform_segment.to(resolved_device)).logits
             else:
                 raise NotImplementedError(f"Align model of type {model_type} not supported.")
             emissions = torch.log_softmax(emissions, dim=-1)

@@ -34,7 +34,8 @@ dev = ["pytest"]
 coherex = "coherex.__main__:cli"
 
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 include-package-data = true
@@ -42,3 +43,6 @@ include-package-data = true
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["coherex*"]
+
+[tool.setuptools.package-data]
+coherex = ["assets/*.bin", "assets/*.npz"]

@@ -107,6 +107,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
             model_name=align_model_name,
             model_dir=model_dir,
             model_cache_only=model_cache_only,
+            device_index=device_index,
         )
         aligned_results = []
         for result, audio_path, audio in results:
@@ -123,6 +124,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
                         model_name=align_model_name,
                         model_dir=model_dir,
                         model_cache_only=model_cache_only,
+                        device_index=device_index,
                     )
                 logger.info("Performing alignment...")
                 aligned = align(
@@ -134,6 +136,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
                     interpolate_method=interpolate_method,
                     return_char_alignments=return_char_alignments,
                     print_progress=print_progress,
+                    device_index=device_index,
                 )
                 aligned_results.append((aligned, audio_path))
             else:

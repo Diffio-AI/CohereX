@@ -59,7 +59,7 @@ def cli():
     parser.add_argument("--no_align", action="store_true", help="do not perform phoneme alignment")
     parser.add_argument("--return_char_alignments", action="store_true", help="return character-level alignments in JSON output")
 
-    parser.add_argument("--vad_method", type=str, default="pyannote", choices=["pyannote", "firered", "none"], help="voice activity detection method")
+    parser.add_argument("--vad_method", type=str, default="firered", choices=["pyannote", "firered", "none"], help="voice activity detection method")
     parser.add_argument("--vad_model_dir", type=str, default=None, help="optional VAD model directory, snapshot directory, or cache directory")
     parser.add_argument("--vad_onset", type=float, default=0.500, help="onset threshold for VAD")
     parser.add_argument("--vad_offset", type=float, default=0.363, help="offset threshold for VAD")
