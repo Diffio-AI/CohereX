@@ -28,6 +28,28 @@ def _parse_language(value: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def _parse_align_backend(value: str) -> str:
+    normalized_value = value.lower()
+    aliases = {
+        "nemo": "nemo_ctc_or_hybrid",
+        "nemo_conformer": "nemo_conformer_ctc",
+    }
+    supported = {
+        "wav2vec2",
+        "qwen3",
+        "nemo_ctc_or_hybrid",
+        "nemo_conformer_ctc",
+    }
+    if normalized_value in aliases:
+        return aliases[normalized_value]
+    if normalized_value in supported:
+        return normalized_value
+    supported_values = ", ".join(sorted(supported | set(aliases)))
+    raise argparse.ArgumentTypeError(
+        f"unsupported align backend {value!r}. Expected one of: {supported_values}"
+    )
+
+
 def cli():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("audio", nargs="+", type=str, help="audio file(s) to transcribe")
@@ -54,8 +76,8 @@ def cli():
     parser.add_argument("--verbose", type=str2bool, default=True, help="whether to print progress and debug messages")
     parser.add_argument("--log-level", type=str, default=None, choices=["debug", "info", "warning", "error", "critical"], help="logging level")
 
-    parser.add_argument("--align_model", default=None, help="alignment model id or local path. For `wav2vec2`, this is a CTC model; for `qwen3`, this defaults to Qwen/Qwen3-ForcedAligner-0.6B; for `nemo`, this is a NeMo CTC or hybrid CTC checkpoint")
-    parser.add_argument("--align_backend", default="wav2vec2", choices=["wav2vec2", "qwen3", "nemo"], help="forced alignment backend to use")
+    parser.add_argument("--align_model", default=None, help="alignment model id or local path. For `wav2vec2`, this is a CTC model; for `qwen3`, this defaults to Qwen/Qwen3-ForcedAligner-0.6B; for `nemo_ctc_or_hybrid`, this is a NeMo CTC or hybrid CTC checkpoint; for `nemo_conformer_ctc`, this defaults to nvidia/stt_en_conformer_ctc_large")
+    parser.add_argument("--align_backend", type=_parse_align_backend, default="wav2vec2", metavar="BACKEND", help="forced alignment backend to use: wav2vec2, qwen3, nemo_ctc_or_hybrid, or nemo_conformer_ctc")
     parser.add_argument("--interpolate_method", default="nearest", choices=["nearest", "linear", "ignore"], help="method to assign timestamps to non-aligned words")
     parser.add_argument("--no_align", action="store_true", help="do not perform phoneme alignment")
     parser.add_argument("--return_char_alignments", action="store_true", help="return character-level alignments in JSON output")

@@ -18,6 +18,7 @@ ALIGNMENT_BASELINE_PATH = FIXTURES_DIR / "regression_word_alignment.json"
 ALIGNMENT_TOLERANCE_S = 0.02
 ALIGNMENT_SCORE_TOLERANCE = 0.005
 QWEN_ALIGNMENT_TOLERANCE_S = 0.12
+NEMO_CONFORMER_ALIGNMENT_TOLERANCE_S = 0.08
 NEMO_MEAN_START_ERROR_TOLERANCE_S = 0.09
 NEMO_MEAN_END_ERROR_TOLERANCE_S = 0.16
 NEMO_P95_START_ERROR_TOLERANCE_S = 0.18
@@ -99,9 +100,24 @@ def qwen_alignment_model():
 @pytest.fixture(scope="session")
 def nemo_alignment_model():
     try:
-        model, metadata = load_align_model("en", "cpu", backend="nemo")
+        model, metadata = load_align_model("en", "cpu", backend="nemo_ctc_or_hybrid")
     except Exception as exc:
         pytest.skip(f"NeMo alignment model unavailable: {exc}")
+
+    yield model, metadata
+
+    del model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+@pytest.fixture(scope="session")
+def nemo_conformer_alignment_model():
+    try:
+        model, metadata = load_align_model("en", "cpu", backend="nemo_conformer_ctc")
+    except Exception as exc:
+        pytest.skip(f"NeMo Conformer alignment model unavailable: {exc}")
 
     yield model, metadata
 
@@ -233,3 +249,35 @@ def test_nemo_word_alignment_regression_matches_ground_truth(
     assert _percentile(end_errors, 0.95) <= NEMO_P95_END_ERROR_TOLERANCE_S
     assert max(start_errors) <= NEMO_MAX_START_ERROR_TOLERANCE_S
     assert max(end_errors) <= NEMO_MAX_END_ERROR_TOLERANCE_S
+
+
+def test_nemo_conformer_word_alignment_regression_matches_ground_truth(
+    nemo_conformer_alignment_model,
+    transcript_baselines,
+    alignment_baselines,
+):
+    filename = "amelia_earhart_noisy.c431d09f.wav"
+    model, metadata = nemo_conformer_alignment_model
+    audio = load_audio(str(AUDIO_DIR / filename))
+    transcript_segments = transcript_baselines[filename]["segments"]
+
+    result = align(
+        transcript_segments,
+        model,
+        metadata,
+        audio,
+        "cpu",
+        return_char_alignments=False,
+    )
+    expected = alignment_baselines[filename]
+
+    assert len(result["word_segments"]) == len(expected["word_segments"])
+
+    for actual_word, expected_word in zip(result["word_segments"], expected["word_segments"]):
+        assert actual_word["word"] == expected_word["word"]
+        assert actual_word["start"] == pytest.approx(
+            expected_word["start"], abs=NEMO_CONFORMER_ALIGNMENT_TOLERANCE_S
+        )
+        assert actual_word["end"] == pytest.approx(
+            expected_word["end"], abs=NEMO_CONFORMER_ALIGNMENT_TOLERANCE_S
+        )

@@ -19,7 +19,7 @@ CohereX provides fast, highly accurate speech recognition by combining Cohere's 
 
 ## Features
 
-- **Accurate Word-Level Timestamps:** Utilizes wav2vec2 alignment by default, with optional Qwen3 and NeMo forced alignment backends.
+- **Accurate Word-Level Timestamps:** Utilizes wav2vec2 alignment by default, with optional Qwen3, NeMo CTC/Hybrid, and NeMo Conformer CTC forced alignment backends.
 - **Advanced VAD Preprocessing:** Integrates highly accurate Voice Activity Detection to handle long audio files efficiently and reduce hallucinations. Features support for the exceptional [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD).
 - **Language Identification:** Robust language detection capabilities using dual language ID models.
 - **Production Ready:** Easy-to-use CLI and Python API.
@@ -48,7 +48,7 @@ We proudly support **FireRedVAD**, an open-source, highly robust VAD model that 
 
 ## Forced Alignment
 
-Like WhisperX, CohereX achieves highly accurate word-level timestamps by performing forced alignment after the initial transcription. By default we use wav2vec2 models to align the generated text with the original audio, and we also support `Qwen/Qwen3-ForcedAligner-0.6B` and NVIDIA NeMo Forced Aligner as alternative backends. The Qwen backend is limited to Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish, so CohereX will raise an error if Qwen alignment is requested for another detected language. The NeMo backend works with NeMo CTC or hybrid CTC checkpoints; CohereX provides an English default model and requires `--align_model` for other languages.
+Like WhisperX, CohereX achieves highly accurate word-level timestamps by performing forced alignment after the initial transcription. By default we use wav2vec2 models to align the generated text with the original audio, and we also support `Qwen/Qwen3-ForcedAligner-0.6B`, NVIDIA NeMo Forced Aligner with a `nemo_ctc_or_hybrid` backend, and a `nemo_conformer_ctc` backend that defaults to `nvidia/stt_en_conformer_ctc_large`. The Qwen backend is limited to Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish, so CohereX will raise an error if Qwen alignment is requested for another detected language. The NeMo backends work with NeMo CTC or hybrid CTC checkpoints; CohereX provides English defaults and requires `--align_model` for other languages.
 
 ## Language Identification
 
@@ -85,8 +85,8 @@ uv run coherex audio.mp3
 - `--model`: Specify the Cohere model size/version (default: `cohere-transcribe-03-2026`).
 - `--vad_method`: Choose the VAD model, e.g., `firered` (default) or `pyannote`.
 - `--language`: Force a specific language code (e.g., `en`). If omitted, language ID will be computed automatically.
-- `--align_backend`: Choose `wav2vec2` (default), `qwen3`, or `nemo` for forced alignment.
-- `--align_model`: Specify a custom alignment model. For `qwen3`, the default is `Qwen/Qwen3-ForcedAligner-0.6B`. For `nemo`, pass a NeMo CTC or hybrid CTC checkpoint.
+- `--align_backend`: Choose `wav2vec2` (default), `qwen3`, `nemo_ctc_or_hybrid`, or `nemo_conformer_ctc` for forced alignment.
+- `--align_model`: Specify a custom alignment model. For `qwen3`, the default is `Qwen/Qwen3-ForcedAligner-0.6B`. For `nemo_ctc_or_hybrid`, pass a NeMo CTC or hybrid CTC checkpoint. For `nemo_conformer_ctc`, the default is `nvidia/stt_en_conformer_ctc_large`.
 
 ### Selecting A Forced-Alignment Backend
 
@@ -105,13 +105,19 @@ uv run coherex audio.mp3 --align_backend qwen3
 Select the NeMo backend:
 
 ```bash
-uv run coherex audio.mp3 --align_backend nemo
+uv run coherex audio.mp3 --align_backend nemo_ctc_or_hybrid
+```
+
+Select the NeMo Conformer backend:
+
+```bash
+uv run coherex audio.mp3 --align_backend nemo_conformer_ctc
 ```
 
 Select the NeMo backend for English with an explicit language override:
 
 ```bash
-uv run coherex audio.mp3 --language en --align_backend nemo
+uv run coherex audio.mp3 --language en --align_backend nemo_ctc_or_hybrid
 ```
 
 Select a custom wav2vec2 alignment model:
@@ -134,7 +140,7 @@ Select a custom NeMo aligner checkpoint:
 
 ```bash
 uv run coherex audio.mp3 \
-  --align_backend nemo \
+  --align_backend nemo_ctc_or_hybrid \
   --align_model stt_en_fastconformer_hybrid_large_pc
 ```
 
@@ -143,17 +149,18 @@ Select the NeMo backend for a non-English language by passing an explicit NeMo c
 ```bash
 uv run coherex audio.mp3 \
   --language de \
-  --align_backend nemo \
+  --align_backend nemo_ctc_or_hybrid \
   --align_model <your-nemo-ctc-or-hybrid-ctc-checkpoint>
 ```
 
 Notes:
-- `wav2vec2` remains the default, so you only need `--align_backend` when switching to `qwen3` or `nemo`.
+- `wav2vec2` remains the default, so you only need `--align_backend` when switching to `qwen3`, `nemo_ctc_or_hybrid`, or `nemo_conformer_ctc`.
 - `qwen3` requires the optional dependency set: `uv sync --extra dev --extra qwen`
-- `nemo` requires the optional dependency set: `uv sync --extra dev --extra nemo`
+- `nemo_ctc_or_hybrid` and `nemo_conformer_ctc` require the optional dependency set: `uv sync --extra dev --extra nemo`
 - `qwen3` only supports Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish.
-- `nemo` currently defaults only for English in CohereX. For other languages, pass a NeMo CTC or hybrid CTC checkpoint with `--align_model`.
-- `nemo` supports NeMo CTC checkpoints and hybrid RNNT-CTC checkpoints running in CTC mode. Pure RNNT checkpoints are not supported.
+- `nemo_ctc_or_hybrid` and `nemo_conformer_ctc` currently default only for English in CohereX. For other languages, pass a NeMo CTC or hybrid CTC checkpoint with `--align_model`.
+- `nemo_ctc_or_hybrid` supports NeMo CTC checkpoints and hybrid RNNT-CTC checkpoints running in CTC mode. Pure RNNT checkpoints are not supported.
+- `nemo_conformer_ctc` defaults to `nvidia/stt_en_conformer_ctc_large`.
 
 ### NeMo Backend Quickstart
 
@@ -164,7 +171,13 @@ If you want to use NVIDIA NeMo Forced Aligner:
 uv sync --extra dev --extra nemo
 
 # 2. Run CohereX with the NeMo aligner
-uv run coherex audio.mp3 --language en --align_backend nemo
+uv run coherex audio.mp3 --language en --align_backend nemo_ctc_or_hybrid
+```
+
+To use the NeMo Conformer aligner instead:
+
+```bash
+uv run coherex audio.mp3 --language en --align_backend nemo_conformer_ctc
 ```
 
 If the detected or requested language is not English, also pass a compatible NeMo checkpoint:
@@ -172,7 +185,7 @@ If the detected or requested language is not English, also pass a compatible NeM
 ```bash
 uv run coherex audio.mp3 \
   --language es \
-  --align_backend nemo \
+  --align_backend nemo_ctc_or_hybrid \
   --align_model <spanish-nemo-ctc-or-hybrid-ctc-checkpoint>
 ```
 
@@ -182,7 +195,7 @@ In Python, the equivalent call is:
 model_a, metadata = coherex.load_align_model(
     language_code="en",
     device="cuda",
-    backend="nemo",
+    backend="nemo_ctc_or_hybrid",
 )
 ```
 
@@ -246,7 +259,14 @@ model_a, metadata = coherex.load_align_model(language_code=result["language"], d
 # model_a, metadata = coherex.load_align_model(
 #     language_code=result["language"],
 #     device="cuda",
-#     backend="nemo",
+#     backend="nemo_ctc_or_hybrid",
+# )
+#
+# NeMo Conformer backend
+# model_a, metadata = coherex.load_align_model(
+#     language_code=result["language"],
+#     device="cuda",
+#     backend="nemo_conformer_ctc",
 # )
 
 # Custom backend + custom alignment model
@@ -287,13 +307,13 @@ CohereX processes audio in a multi-stage pipeline:
 1. **VAD Segmentation:** The audio is chunked into active speech segments using FireRedVAD or Pyannote VAD.
 2. **Language ID:** The language of the segments is computed using our dual-model language identification system.
 3. **Transcription:** The active speech segments are batched and processed by the Cohere ASR model.
-4. **Alignment:** The resulting text is aligned against the audio using either a wav2vec2 acoustic model, the optional Qwen3 forced aligner, or the optional NeMo forced aligner to generate precise word-level timestamps.
+4. **Alignment:** The resulting text is aligned against the audio using either a wav2vec2 acoustic model, the optional Qwen3 forced aligner, the optional `nemo_ctc_or_hybrid` NeMo forced aligner, or the optional `nemo_conformer_ctc` NeMo forced aligner to generate precise word-level timestamps.
 
 ## Limitations
 
 - **No Diarization:** CohereX does not currently support speaker diarization (identifying "who spoke when").
 - **Compute Requirements:** Running the full pipeline (VAD + ASR + Alignment) requires a GPU with sufficient VRAM, especially for the larger Cohere models.
-- **Alignment Language Support:** `wav2vec2` alignment depends on the availability of a compatible CTC model for the detected language. `qwen3` alignment currently supports Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish. `nemo` alignment works with NeMo CTC and hybrid CTC checkpoints; CohereX provides an English default and otherwise expects an explicit NeMo checkpoint.
+- **Alignment Language Support:** `wav2vec2` alignment depends on the availability of a compatible CTC model for the detected language. `qwen3` alignment currently supports Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish. `nemo_ctc_or_hybrid` alignment works with NeMo CTC and hybrid CTC checkpoints; `nemo_conformer_ctc` defaults to `nvidia/stt_en_conformer_ctc_large`; CohereX otherwise expects an explicit NeMo checkpoint.
 
 ---
 

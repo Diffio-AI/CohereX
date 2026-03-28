@@ -33,3 +33,6 @@ save/
 venv/
 env/
 ENV/
+
+timit
+scripts/

@@ -5,6 +5,7 @@ C. Max Bain
 import os
 import sys
 import tempfile
+import warnings
 from dataclasses import dataclass
 from typing import Iterable, Optional, Union, List
 
@@ -55,9 +56,26 @@ QWEN3_SUPPORTED_LANGUAGE_NAMES = {
     "ru": "Russian",
     "es": "Spanish",
 }
-NEMO_DEFAULT_ALIGN_MODELS = {
+SUPPORTED_ALIGN_BACKENDS = (
+    "wav2vec2",
+    "qwen3",
+    "nemo_ctc_or_hybrid",
+    "nemo_conformer_ctc",
+)
+ALIGN_BACKEND_ALIASES = {
+    "nemo": "nemo_ctc_or_hybrid",
+    "nemo_conformer": "nemo_conformer_ctc",
+}
+
+NEMO_CTC_OR_HYBRID_DEFAULT_ALIGN_MODELS = {
     "en": "stt_en_fastconformer_hybrid_large_pc",
 }
+NEMO_CONFORMER_CTC_DEFAULT_ALIGN_MODELS = {
+    "en": "nvidia/stt_en_conformer_ctc_large",
+}
+# Backward-compatible aliases for older public constant names.
+NEMO_DEFAULT_ALIGN_MODELS = NEMO_CTC_OR_HYBRID_DEFAULT_ALIGN_MODELS
+NEMO_CONFORMER_DEFAULT_ALIGN_MODELS = NEMO_CONFORMER_CTC_DEFAULT_ALIGN_MODELS
 
 DEFAULT_ALIGN_MODELS_TORCH = {
     "en": "WAV2VEC2_ASR_BASE_960H",
@@ -115,9 +133,83 @@ def _resolve_device(device: Union[str, torch.device], device_index: int = 0) -> 
 
 
 def _infer_align_backend(model_name: Optional[str], backend: str) -> str:
-    if model_name is not None and "qwen3-forcedaligner" in model_name.lower().replace("_", "-"):
+    backend = _normalize_align_backend(backend)
+
+    if model_name is None:
+        return backend
+
+    normalized_model_name = model_name.lower().replace("_", "-")
+    if "qwen3-forcedaligner" in normalized_model_name:
         return "qwen3"
+    if normalized_model_name in {
+        "nvidia/stt-en-conformer-ctc-large",
+        "stt-en-conformer-ctc-large",
+    }:
+        return "nemo_conformer_ctc"
     return backend
+
+
+def _normalize_align_backend(backend: str) -> str:
+    normalized_backend = backend.lower()
+    if normalized_backend in ALIGN_BACKEND_ALIASES:
+        canonical_backend = ALIGN_BACKEND_ALIASES[normalized_backend]
+        warnings.warn(
+            f"`{backend}` is deprecated; use `{canonical_backend}` instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return canonical_backend
+    if normalized_backend in SUPPORTED_ALIGN_BACKENDS:
+        return normalized_backend
+    return backend
+
+
+def _load_nemo_align_backend(
+    *,
+    backend: str,
+    language_code: str,
+    model_name: Optional[str],
+    resolved_device: torch.device,
+    model_cache_only: bool,
+):
+    default_models = {
+        "nemo_ctc_or_hybrid": NEMO_CTC_OR_HYBRID_DEFAULT_ALIGN_MODELS,
+        "nemo_conformer_ctc": NEMO_CONFORMER_CTC_DEFAULT_ALIGN_MODELS,
+    }
+    backend_display_name = {
+        "nemo_ctc_or_hybrid": "NeMo CTC/Hybrid",
+        "nemo_conformer_ctc": "NeMo Conformer CTC",
+    }
+
+    if backend not in default_models:
+        raise ValueError(f"Unsupported NeMo alignment backend: {backend}")
+
+    if model_name is None:
+        if language_code not in default_models[backend]:
+            raise ValueError(
+                f"No default {backend_display_name[backend]} align-model for language: "
+                f"{language_code}. Pass a NeMo CTC or hybrid CTC checkpoint via --align_model."
+            )
+        model_name = default_models[backend][language_code]
+
+    if model_cache_only and not os.path.exists(model_name):
+        raise ValueError(
+            "NeMo forced alignment does not support cache-only loading by model name. "
+            "Pass a local `.nemo` model path or disable --model_cache_only."
+        )
+
+    align_model = _load_nemo_align_model(
+        model_name=model_name,
+        resolved_device=resolved_device,
+    )
+    align_metadata = {
+        "language": language_code,
+        "dictionary": None,
+        "type": "nemo",
+        "batch_size": 1,
+        "model_name": model_name,
+    }
+    return align_model, align_metadata
 
 
 def _build_fallback_segment(
@@ -566,33 +658,14 @@ def load_align_model(
         }
         return align_model, align_metadata
 
-    if backend == "nemo":
-        if model_name is None:
-            if language_code not in NEMO_DEFAULT_ALIGN_MODELS:
-                raise ValueError(
-                    "No default NeMo align-model for language: "
-                    f"{language_code}. Pass a NeMo CTC or hybrid CTC checkpoint via --align_model."
-                )
-            model_name = NEMO_DEFAULT_ALIGN_MODELS[language_code]
-
-        if model_cache_only and not os.path.exists(model_name):
-            raise ValueError(
-                "NeMo forced alignment does not support cache-only loading by model name. "
-                "Pass a local `.nemo` model path or disable --model_cache_only."
-            )
-
-        align_model = _load_nemo_align_model(
+    if backend in {"nemo_ctc_or_hybrid", "nemo_conformer_ctc"}:
+        return _load_nemo_align_backend(
+            backend=backend,
+            language_code=language_code,
             model_name=model_name,
             resolved_device=resolved_device,
+            model_cache_only=model_cache_only,
         )
-        align_metadata = {
-            "language": language_code,
-            "dictionary": None,
-            "type": "nemo",
-            "batch_size": 1,
-            "model_name": model_name,
-        }
-        return align_model, align_metadata
 
     if backend != "wav2vec2":
         raise ValueError(f"Unsupported alignment backend: {backend}")
