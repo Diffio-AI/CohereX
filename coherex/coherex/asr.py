@@ -1,6 +1,7 @@
 import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional, Union
 
 os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
@@ -13,6 +14,7 @@ sys.modules.setdefault("keras", None)
 
 import numpy as np
 import torch
+from huggingface_hub import snapshot_download
 from transformers.generation.logits_process import LogitsProcessorList, SuppressTokensLogitsProcessor
 
 from coherex.audio import SAMPLE_RATE, load_audio
@@ -30,6 +32,12 @@ from coherex.tokenization_cohere_asr import CohereAsrTokenizer
 from coherex.vads.binarize import Binarize
 
 logger = get_logger(__name__)
+COHERE_MODEL_REQUIRED_FILES = (
+    "config.json",
+    "model.safetensors",
+    "preprocessor_config.json",
+    "tokenizer_config.json",
+)
 
 
 @dataclass
@@ -88,6 +96,55 @@ def _resolve_dtype(compute_type: str, device: torch.device) -> torch.dtype:
     if compute_type == "float32":
         return torch.float32
     raise ValueError(f"Unsupported compute_type: {compute_type}")
+
+
+def _has_required_files(path: Path, required_files: tuple[str, ...]) -> bool:
+    return path.is_dir() and all((path / filename).exists() for filename in required_files)
+
+
+def _resolve_model_source(
+    model_name: str,
+    download_root: Optional[str],
+    local_files_only: bool,
+    token,
+) -> str:
+    candidate_paths = []
+    if model_name is not None:
+        candidate_paths.append(Path(model_name).expanduser())
+    if download_root is not None:
+        candidate_paths.append(Path(download_root).expanduser())
+
+    for path in candidate_paths:
+        if _has_required_files(path, COHERE_MODEL_REQUIRED_FILES):
+            logger.info("Using local Cohere model files from %s", path)
+            return str(path)
+
+    cache_dir = None
+    if download_root is not None:
+        cache_dir = str(Path(download_root).expanduser())
+
+    if local_files_only:
+        logger.info("Loading cached Cohere model files for %s", model_name)
+    else:
+        logger.info("Resolving Cohere model files for %s", model_name)
+
+    try:
+        snapshot_dir = snapshot_download(
+            model_name,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+            token=token,
+        )
+    except Exception as exc:
+        action = "load cached" if local_files_only else "download"
+        raise RuntimeError(
+            f"Unable to {action} Cohere model files for {model_name!r}. "
+            "Pass a local snapshot path with --model, or set --model_dir to a cache directory "
+            "or a resolved snapshot directory."
+        ) from exc
+
+    logger.info("Resolved Cohere model files at %s", snapshot_dir)
+    return snapshot_dir
 
 
 def _segments_from_vad(scores, onset: float, offset: Optional[float]) -> List[SpeechSpan]:
@@ -377,17 +434,22 @@ def load_model(
     if threads > 0 and torch_device.type == "cpu":
         torch.set_num_threads(threads)
 
-    config = CohereAsrConfig.from_pretrained(
-        model_name,
-        cache_dir=download_root,
+    resolved_model_source = _resolve_model_source(
+        model_name=model_name,
+        download_root=download_root,
         local_files_only=local_files_only,
         token=use_auth_token,
     )
+
+    config = CohereAsrConfig.from_pretrained(
+        resolved_model_source,
+        local_files_only=True,
+        token=use_auth_token,
+    )
     model = CohereAsrForConditionalGeneration.from_pretrained(
-        model_name,
+        resolved_model_source,
         config=config,
-        cache_dir=download_root,
-        local_files_only=local_files_only,
+        local_files_only=True,
         token=use_auth_token,
         dtype=torch_dtype,
     )
@@ -395,16 +457,14 @@ def load_model(
     model.eval()
 
     feature_extractor = CohereAsrFeatureExtractor.from_pretrained(
-        model_name,
-        cache_dir=download_root,
-        local_files_only=local_files_only,
+        resolved_model_source,
+        local_files_only=True,
         token=use_auth_token,
         device=str(torch_device),
     )
     tokenizer = CohereAsrTokenizer.from_pretrained(
-        model_name,
-        cache_dir=download_root,
-        local_files_only=local_files_only,
+        resolved_model_source,
+        local_files_only=True,
         token=use_auth_token,
     )
     processor = CohereAsrProcessor(feature_extractor=feature_extractor, tokenizer=tokenizer)

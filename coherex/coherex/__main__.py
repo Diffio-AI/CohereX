@@ -31,9 +31,9 @@ def _parse_language(value: str) -> str:
 def cli():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("audio", nargs="+", type=str, help="audio file(s) to transcribe")
-    parser.add_argument("--model", default="CohereLabs/cohere-transcribe-03-2026", help="name of the Cohere model to use")
+    parser.add_argument("--model", default="CohereLabs/cohere-transcribe-03-2026", help="Hugging Face model id or local snapshot directory for the Cohere model")
     parser.add_argument("--model_cache_only", type=str2bool, default=False, help="If True, only use cached model files from --model_dir")
-    parser.add_argument("--model_dir", type=str, default=None, help="directory for cached model files")
+    parser.add_argument("--model_dir", type=str, default=None, help="cache directory for downloaded model files, or a local resolved snapshot directory")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu", help="device type to use for inference")
     parser.add_argument("--device_index", default=0, type=int, help="device index to use for CUDA inference")
     parser.add_argument("--batch_size", default=8, type=int, help="preferred batch size for inference")
@@ -57,7 +57,7 @@ def cli():
     parser.add_argument("--return_char_alignments", action="store_true", help="return character-level alignments in JSON output")
 
     parser.add_argument("--vad_method", type=str, default="pyannote", choices=["pyannote", "firered", "none"], help="voice activity detection method")
-    parser.add_argument("--vad_model_dir", type=str, default=None, help="optional model directory for the selected VAD backend")
+    parser.add_argument("--vad_model_dir", type=str, default=None, help="optional VAD model directory, snapshot directory, or cache directory")
     parser.add_argument("--vad_onset", type=float, default=0.500, help="onset threshold for VAD")
     parser.add_argument("--vad_offset", type=float, default=0.363, help="offset threshold for VAD")
     parser.add_argument("--chunk_size", type=float, default=35.0, help="maximum trimmed speech duration per ASR chunk")

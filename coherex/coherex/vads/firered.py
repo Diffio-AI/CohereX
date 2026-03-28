@@ -10,6 +10,7 @@ from coherex.log_utils import get_logger
 from coherex.vads.vad import Vad
 
 logger = get_logger(__name__)
+FIRERED_REQUIRED_FILES = ("cmvn.ark", "model.pth.tar")
 
 
 def _load_firered_module():
@@ -35,19 +36,50 @@ def _resolve_model_dir(
     local_files_only: bool,
     token,
 ) -> str:
+    candidate_paths = []
     if model_dir is not None:
-        return model_dir
+        candidate_paths.append(Path(model_dir).expanduser())
+    if cache_dir is not None:
+        candidate_paths.append(Path(cache_dir).expanduser())
 
-    snapshot_dir = snapshot_download(
-        "FireRedTeam/FireRedVAD",
-        allow_patterns=["VAD/*"],
-        cache_dir=cache_dir,
-        local_files_only=local_files_only,
-        token=token,
-    )
+    for path in candidate_paths:
+        if path.is_dir() and all((path / name).exists() for name in FIRERED_REQUIRED_FILES):
+            logger.info("Using local FireRedVAD model files from %s", path)
+            return str(path)
+        vad_subdir = path / "VAD"
+        if vad_subdir.is_dir() and all((vad_subdir / name).exists() for name in FIRERED_REQUIRED_FILES):
+            logger.info("Using local FireRedVAD model files from %s", vad_subdir)
+            return str(vad_subdir)
+
+    resolved_cache_dir = None
+    if model_dir is not None:
+        resolved_cache_dir = str(Path(model_dir).expanduser())
+    elif cache_dir is not None:
+        resolved_cache_dir = str(Path(cache_dir).expanduser())
+
+    if local_files_only:
+        logger.info("Loading cached FireRedVAD model files")
+    else:
+        logger.info("Resolving FireRedVAD model files")
+
+    try:
+        snapshot_dir = snapshot_download(
+            "FireRedTeam/FireRedVAD",
+            allow_patterns=["VAD/*"],
+            cache_dir=resolved_cache_dir,
+            local_files_only=local_files_only,
+            token=token,
+        )
+    except Exception as exc:
+        action = "load cached" if local_files_only else "download"
+        raise RuntimeError(
+            f"Unable to {action} FireRedVAD model files. Pass --vad_model_dir pointing to a local "
+            "VAD directory, a snapshot directory, or a cache directory."
+        ) from exc
     resolved_model_dir = Path(snapshot_dir) / "VAD"
     if not resolved_model_dir.exists():
         raise FileNotFoundError(f"FireRedVAD model directory not found at {resolved_model_dir}")
+    logger.info("Resolved FireRedVAD model files at %s", resolved_model_dir)
     return str(resolved_model_dir)
 
 
