@@ -1,0 +1,40 @@
+[project]
+urls = { repository = "https://github.com/nharmon/coherex" }
+authors = [{ name = "Nick Harmon" }]
+name = "coherex"
+version = "0.1.0"
+description = "Time-accurate transcription using Cohere Transcribe with a WhisperX-shaped interface."
+readme = "README.md"
+requires-python = ">=3.10, <3.14"
+license = { text = "BSD-2-Clause" }
+
+dependencies = [
+    "huggingface-hub<1.0.0",
+    "librosa>=0.11.0",
+    "nltk>=3.9.1",
+    "numpy>=2.1.0",
+    "pandas>=2.2.3",
+    "pyannote-audio>=4.0.0",
+    "safetensors>=0.5.3",
+    "sentencepiece>=0.2.0",
+    "soundfile>=0.13.1",
+    "torch~=2.8.0",
+    "torchaudio~=2.8.0",
+    "transformers>=4.48.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+coherex = "coherex.__main__:cli"
+
+[build-system]
+requires = ["setuptools"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["coherex*"]
