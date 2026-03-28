@@ -19,6 +19,7 @@ from transformers.generation.logits_process import LogitsProcessorList, Suppress
 
 from coherex.audio import SAMPLE_RATE, load_audio
 from coherex.configuration_cohere_asr import CohereAsrConfig, normalize_language_code
+from coherex.lids import load_lid_model
 from coherex.log_utils import get_logger
 from coherex.modeling_cohere_asr import (
     CohereAsrForConditionalGeneration,
@@ -250,22 +251,25 @@ class CohereTranscriptionPipeline:
         processor: CohereAsrProcessor,
         vad,
         vad_params: dict,
-        language: str,
+        language: Optional[str],
         punctuation: bool,
         suppress_numerals: bool,
         max_new_tokens: int,
         batch_size: int,
+        lid_model=None,
     ):
         self.model = model
         self.processor = processor
         self.tokenizer = processor.tokenizer
         self.vad_model = vad
+        self.lid_model = lid_model
         self.vad_params = vad_params
-        self.language = language
+        self.preset_language = language
         self.punctuation = punctuation
         self.suppress_numerals = suppress_numerals
         self.max_new_tokens = max_new_tokens
         self._batch_size = batch_size
+        self._active_language = language
         self._suppressed_tokens = (
             find_numeral_symbol_tokens(self.tokenizer) if suppress_numerals else []
         )
@@ -282,6 +286,18 @@ class CohereTranscriptionPipeline:
         if isinstance(audio, str):
             audio = load_audio(audio)
 
+        language = self.preset_language
+        if language is None:
+            prediction = self.detect_language(audio)
+            language = prediction["language"]
+            logger.info(
+                "Detected language: %s using %s (%s, %.2f)",
+                language,
+                prediction["method"],
+                prediction["raw_label"],
+                prediction["score"],
+            )
+
         waveform = self.vad_model.preprocess_audio(audio)
         if isinstance(self.vad_model, NullVad):
             speech_spans = [SpeechSpan(0.0, len(audio) / SAMPLE_RATE)]
@@ -297,7 +313,7 @@ class CohereTranscriptionPipeline:
                 )
         if not speech_spans:
             logger.warning("No active speech found in audio")
-            return {"segments": [], "language": self.language}
+            return {"segments": [], "language": language}
 
         chunk_limit = float(chunk_size or self.model.config.max_audio_clip_s)
         boundary_context = float(self.model.config.overlap_chunk_second)
@@ -311,6 +327,7 @@ class CohereTranscriptionPipeline:
             min_energy_window_samples=min_energy_window_samples,
         )
 
+        self._active_language = language
         texts = self._transcribe_chunks(
             chunks=chunks,
             batch_size=batch_size or self._batch_size,
@@ -334,7 +351,30 @@ class CohereTranscriptionPipeline:
         if verbose:
             logger.info("Transcribed %s segments", len(segments))
 
-        return {"segments": segments, "language": self.language}
+        return {"segments": segments, "language": language}
+
+    def detect_language(self, audio):
+        if self.lid_model is None:
+            if self.preset_language is None:
+                raise ValueError("language is required when no language-id model is configured")
+            return {
+                "language": self.preset_language,
+                "raw_label": self.preset_language,
+                "score": 0.0,
+                "scores": {self.preset_language: 0.0},
+                "method": "preset",
+                "model_name": "preset",
+            }
+
+        prediction = self.lid_model.detect(audio)
+        return {
+            "language": prediction.language,
+            "raw_label": prediction.raw_label,
+            "score": prediction.score,
+            "scores": prediction.scores,
+            "method": prediction.method,
+            "model_name": prediction.model_name,
+        }
 
     def _transcribe_chunks(
         self,
@@ -352,7 +392,10 @@ class CohereTranscriptionPipeline:
         pad_token_id = self.tokenizer.pad_token_id
         eos_token_id = self.tokenizer.eos_token_id
         ordered_indices = sorted(range(len(chunks)), key=lambda idx: chunks[idx].audio.shape[0], reverse=True)
-        prompt_text = self.model.build_prompt(language=self.language, punctuation=self.punctuation)
+        language = self._active_language or self.preset_language
+        if language is None:
+            raise ValueError("language is required before transcribing chunks")
+        prompt_text = self.model.build_prompt(language=language, punctuation=self.punctuation)
         logits_processor = LogitsProcessorList()
         if self._suppressed_tokens:
             logits_processor.append(SuppressTokensLogitsProcessor(self._suppressed_tokens))
@@ -419,6 +462,8 @@ def load_model(
     device_index: int = 0,
     compute_type: str = "default",
     language: Optional[str] = None,
+    lid_method: str = "speechbrain",
+    lid_options: Optional[dict] = None,
     vad_method: str = "pyannote",
     vad_options: Optional[dict] = None,
     download_root: Optional[str] = None,
@@ -427,7 +472,8 @@ def load_model(
     use_auth_token: Optional[Union[str, bool]] = None,
     asr_options: Optional[dict] = None,
 ) -> CohereTranscriptionPipeline:
-    language = normalize_language_code(language)
+    if language is not None:
+        language = normalize_language_code(language)
 
     torch_device = _resolve_device(device, device_index)
     torch_dtype = _resolve_dtype(compute_type, torch_device)
@@ -485,6 +531,13 @@ def load_model(
     if vad_options is not None:
         default_vad_options.update(vad_options)
 
+    default_lid_options = {
+        "model_name": None,
+        "model_dir": None,
+    }
+    if lid_options is not None:
+        default_lid_options.update(lid_options)
+
     if vad_method == "none":
         vad_model = NullVad()
     elif vad_method == "pyannote":
@@ -504,10 +557,22 @@ def load_model(
     else:
         raise ValueError(f"Unsupported vad_method: {vad_method}")
 
+    lid_model = None
+    if language is None:
+        lid_model = load_lid_model(
+            method=lid_method,
+            device=torch_device,
+            model_name=default_lid_options["model_name"],
+            model_dir=default_lid_options["model_dir"],
+            local_files_only=local_files_only,
+            use_auth_token=use_auth_token,
+        )
+
     return CohereTranscriptionPipeline(
         model=model,
         processor=processor,
         vad=vad_model,
+        lid_model=lid_model,
         vad_params=default_vad_options,
         language=language,
         punctuation=default_asr_options["punctuation"],

@@ -20,6 +20,11 @@ def load_model(*args, **kwargs):
     return asr.load_model(*args, **kwargs)
 
 
+def load_lid_model(*args, **kwargs):
+    lids = _lazy_import("lids")
+    return lids.load_lid_model(*args, **kwargs)
+
+
 def load_audio(*args, **kwargs):
     audio = _lazy_import("audio")
     return audio.load_audio(*args, **kwargs)

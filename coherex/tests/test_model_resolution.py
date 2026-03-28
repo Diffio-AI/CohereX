@@ -3,6 +3,11 @@ from pathlib import Path
 import pytest
 
 from coherex.asr import _resolve_model_source
+from coherex.lids.base import (
+    SPEECHBRAIN_LID_REQUIRED_FILES,
+    TALTECH_LID_REQUIRED_FILES,
+    resolve_lid_model_source,
+)
 from coherex.vads.firered import _resolve_model_dir
 
 
@@ -180,3 +185,96 @@ def test_resolve_firered_model_dir_downloads_when_missing(tmp_path, monkeypatch)
         "local_files_only": False,
         "token": "token",
     }]
+
+
+@pytest.mark.parametrize(
+    ("required_files", "model_name", "log_name"),
+    [
+        (SPEECHBRAIN_LID_REQUIRED_FILES, "speechbrain/lang-id-voxlingua107-ecapa", "SpeechBrain language-id"),
+        (TALTECH_LID_REQUIRED_FILES, "TalTechNLP/voxlingua107-xls-r-300m-wav2vec", "TalTech language-id"),
+    ],
+)
+def test_resolve_lid_model_source_prefers_local_snapshot_dir(tmp_path, monkeypatch, required_files, model_name, log_name):
+    model_dir = tmp_path / "lid-snapshot"
+    for filename in required_files:
+        _touch(model_dir / filename)
+
+    called = False
+
+    def fake_snapshot_download(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("snapshot_download should not be called for a local lid snapshot dir")
+
+    monkeypatch.setattr("coherex.lids.base.snapshot_download", fake_snapshot_download)
+
+    resolved = resolve_lid_model_source(
+        model_name=str(model_dir),
+        model_dir=None,
+        local_files_only=False,
+        token=None,
+        required_files=required_files,
+        log_name=log_name,
+    )
+
+    assert resolved == str(model_dir)
+    assert called is False
+
+
+@pytest.mark.parametrize(
+    ("required_files", "model_name", "log_name"),
+    [
+        (SPEECHBRAIN_LID_REQUIRED_FILES, "speechbrain/lang-id-voxlingua107-ecapa", "SpeechBrain language-id"),
+        (TALTECH_LID_REQUIRED_FILES, "TalTechNLP/voxlingua107-xls-r-300m-wav2vec", "TalTech language-id"),
+    ],
+)
+def test_resolve_lid_model_source_downloads_when_missing(tmp_path, monkeypatch, required_files, model_name, log_name):
+    cache_root = tmp_path / "cache"
+    downloaded_snapshot = tmp_path / "downloaded"
+    downloaded_snapshot.mkdir()
+    for filename in required_files:
+        _touch(downloaded_snapshot / filename)
+
+    calls = []
+
+    def fake_snapshot_download(*args, **kwargs):
+        calls.append(kwargs)
+        return str(downloaded_snapshot)
+
+    monkeypatch.setattr("coherex.lids.base.snapshot_download", fake_snapshot_download)
+
+    resolved = resolve_lid_model_source(
+        model_name=model_name,
+        model_dir=str(cache_root),
+        local_files_only=False,
+        token="token",
+        required_files=required_files,
+        log_name=log_name,
+    )
+
+    assert resolved == str(downloaded_snapshot)
+    assert calls == [{"cache_dir": str(cache_root), "local_files_only": False, "token": "token"}]
+
+
+@pytest.mark.parametrize(
+    ("required_files", "model_name", "log_name"),
+    [
+        (SPEECHBRAIN_LID_REQUIRED_FILES, "speechbrain/lang-id-voxlingua107-ecapa", "SpeechBrain language-id"),
+        (TALTECH_LID_REQUIRED_FILES, "TalTechNLP/voxlingua107-xls-r-300m-wav2vec", "TalTech language-id"),
+    ],
+)
+def test_resolve_lid_model_source_raises_clear_error_for_missing_cached_files(tmp_path, monkeypatch, required_files, model_name, log_name):
+    def fake_snapshot_download(*args, **kwargs):
+        raise FileNotFoundError("missing")
+
+    monkeypatch.setattr("coherex.lids.base.snapshot_download", fake_snapshot_download)
+
+    with pytest.raises(RuntimeError, match=f"Unable to load cached {log_name} model files"):
+        resolve_lid_model_source(
+            model_name=model_name,
+            model_dir=str(tmp_path / "cache"),
+            local_files_only=True,
+            token=None,
+            required_files=required_files,
+            log_name=log_name,
+        )

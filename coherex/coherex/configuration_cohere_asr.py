@@ -70,6 +70,17 @@ def supported_languages_help_text() -> str:
     return "\n".join(lines)
 
 
+def maybe_normalize_language_code(language: str | None) -> str | None:
+    if language is None or not str(language).strip():
+        return None
+
+    normalized = str(language).strip().lower()
+    normalized = normalized.replace("_", " ").replace("-", " ")
+    normalized = re.sub(r"[^a-z0-9 ]+", " ", normalized)
+    normalized = " ".join(normalized.split())
+    return SUPPORTED_LANGUAGE_ALIASES.get(normalized)
+
+
 def normalize_language_code(language: str) -> str:
     if language is None or not str(language).strip():
         raise ValueError(
@@ -77,11 +88,7 @@ def normalize_language_code(language: str) -> str:
             f"{supported_languages_help_text()}"
         )
 
-    normalized = str(language).strip().lower()
-    normalized = normalized.replace("_", " ").replace("-", " ")
-    normalized = re.sub(r"[^a-z0-9 ]+", " ", normalized)
-    normalized = " ".join(normalized.split())
-    code = SUPPORTED_LANGUAGE_ALIASES.get(normalized)
+    code = maybe_normalize_language_code(language)
     if code is None:
         raise ValueError(
             f"Unsupported language: {language!r}. Supported languages:\n"

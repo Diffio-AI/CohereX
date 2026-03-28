@@ -33,6 +33,9 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
     return_char_alignments: bool = args.pop("return_char_alignments")
 
     language: str = args.pop("language")
+    lid_method: str = args.pop("lid_method")
+    lid_model: str = args.pop("lid_model")
+    lid_model_dir: str = args.pop("lid_model_dir")
     hf_token: str = args.pop("hf_token")
     vad_method: str = args.pop("vad_method")
     vad_model_dir: str = args.pop("vad_model_dir")
@@ -61,6 +64,8 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
         device_index=device_index,
         compute_type=compute_type,
         language=language,
+        lid_method=lid_method,
+        lid_options={"model_name": lid_model, "model_dir": lid_model_dir},
         vad_method=vad_method,
         vad_options={"vad_onset": vad_onset, "vad_offset": vad_offset, "model_dir": vad_model_dir},
         asr_options={
@@ -95,8 +100,9 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
     if not no_align:
         from coherex.alignment import align, load_align_model
 
+        align_language = language if language is not None else "en"
         align_model, align_metadata = load_align_model(
-            language,
+            align_language,
             device,
             model_name=align_model_name,
             model_dir=model_dir,
@@ -105,6 +111,19 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
         aligned_results = []
         for result, audio_path, audio in results:
             if align_model is not None and len(result["segments"]) > 0:
+                if result.get("language", align_language) != align_metadata["language"]:
+                    logger.info(
+                        "New language found (%s)! Previous was (%s), loading new alignment model...",
+                        result["language"],
+                        align_metadata["language"],
+                    )
+                    align_model, align_metadata = load_align_model(
+                        result["language"],
+                        device,
+                        model_name=align_model_name,
+                        model_dir=model_dir,
+                        model_cache_only=model_cache_only,
+                    )
                 logger.info("Performing alignment...")
                 aligned = align(
                     result["segments"],
@@ -124,5 +143,6 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
         results_to_write = [(result, audio_path) for result, audio_path, _ in results]
 
     for result, audio_path in results_to_write:
-        result["language"] = language
+        if language is not None:
+            result["language"] = language
         writer(result, audio_path, writer_args)

@@ -1,0 +1,42 @@
+{
+  "hur.mp3": {
+    "speechbrain": {
+      "language": "en",
+      "raw_label": "en: English"
+    },
+    "taltech": {
+      "language": "en",
+      "raw_label": "en"
+    }
+  },
+  "amelia_earhart_noisy.c431d09f.wav": {
+    "speechbrain": {
+      "language": "en",
+      "raw_label": "en: English"
+    },
+    "taltech": {
+      "language": "en",
+      "raw_label": "en"
+    }
+  },
+  "david-gooding-noisy.mp3": {
+    "speechbrain": {
+      "language": "en",
+      "raw_label": "cy: Welsh"
+    },
+    "taltech": {
+      "language": "en",
+      "raw_label": "en"
+    }
+  },
+  "suppress-numerals.mp3": {
+    "speechbrain": {
+      "language": "en",
+      "raw_label": "en: English"
+    },
+    "taltech": {
+      "language": "en",
+      "raw_label": "en"
+    }
+  }
+}

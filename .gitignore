@@ -26,6 +26,7 @@ build/
 site/
 *.egg-info/
 .eggs/
+save/
 
 # Virtual environments
 .venv/

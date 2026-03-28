@@ -18,6 +18,7 @@ dependencies = [
     "pandas>=2.2.3",
     "pyannote-audio>=4.0.0",
     "safetensors>=0.5.3",
+    "speechbrain>=1.0.3",
     "sentencepiece>=0.2.0",
     "soundfile>=0.13.1",
     "textgrid>=1.6.1",

@@ -40,11 +40,14 @@ def cli():
     parser.add_argument("--compute_type", default="default", type=str, choices=["default", "float16", "bfloat16", "float32"], help="compute type for inference")
     parser.add_argument(
         "--language",
-        required=True,
         type=_parse_language,
+        default=None,
         metavar="LANGUAGE",
-        help="language spoken in the audio. Supported languages:\n" + supported_languages_help_text(),
+        help="language spoken in the audio. If omitted, automatic language identification is used. Supported languages:\n" + supported_languages_help_text(),
     )
+    parser.add_argument("--lid_method", type=str, default="speechbrain", choices=["speechbrain", "taltech"], help="automatic language identification backend")
+    parser.add_argument("--lid_model", type=str, default=None, help="optional language-id model id or local snapshot directory")
+    parser.add_argument("--lid_model_dir", type=str, default=None, help="optional language-id cache directory or local snapshot directory")
 
     parser.add_argument("--output_dir", "-o", type=str, default=".", help="directory to save the outputs")
     parser.add_argument("--output_format", "-f", type=str, default="all", choices=["all", "srt", "vtt", "txt", "tsv", "json"], help="format of the output file")
