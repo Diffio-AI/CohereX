@@ -19,7 +19,7 @@ CohereX provides fast, highly accurate speech recognition by combining Cohere's 
 
 ## Features
 
-- **Accurate Word-Level Timestamps:** Utilizes wav2vec2 alignment for precise word-level timing.
+- **Accurate Word-Level Timestamps:** Utilizes wav2vec2 alignment by default, with optional Qwen3 forced alignment support for supported languages.
 - **Advanced VAD Preprocessing:** Integrates highly accurate Voice Activity Detection to handle long audio files efficiently and reduce hallucinations. Features support for the exceptional [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD).
 - **Language Identification:** Robust language detection capabilities using dual language ID models.
 - **Production Ready:** Easy-to-use CLI and Python API.
@@ -48,7 +48,7 @@ We proudly support **FireRedVAD**, an open-source, highly robust VAD model that 
 
 ## Forced Alignment
 
-Like WhisperX, CohereX achieves highly accurate word-level timestamps by performing forced alignment after the initial transcription. We use wav2vec2 models to align the generated text with the original audio, ensuring that every word is precisely timed down to the millisecond.
+Like WhisperX, CohereX achieves highly accurate word-level timestamps by performing forced alignment after the initial transcription. By default we use wav2vec2 models to align the generated text with the original audio, and we also support `Qwen/Qwen3-ForcedAligner-0.6B` as a stronger alternative backend for supported languages. The Qwen backend is limited to Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish, so CohereX will raise an error if Qwen alignment is requested for another detected language.
 
 ## Language Identification
 
@@ -61,6 +61,9 @@ CohereX includes a robust language identification step before transcription. We 
 ```bash
 # Sync the CohereX project environment from the repo root
 uv sync --extra dev
+
+# Install the optional Qwen forced-alignment backend
+uv sync --extra dev --extra qwen
 ```
 
 The project metadata lives in [`pyproject.toml`](/home/nharmon/git/data_utils_v2/CohereX/pyproject.toml), so you can run `uv` commands directly from the repository root.
@@ -79,7 +82,43 @@ uv run coherex audio.mp3
 - `--model`: Specify the Cohere model size/version (default: `cohere-transcribe-03-2026`).
 - `--vad_method`: Choose the VAD model, e.g., `firered` (default) or `pyannote`.
 - `--language`: Force a specific language code (e.g., `en`). If omitted, language ID will be computed automatically.
-- `--align_model`: Specify a custom wav2vec2 model for forced alignment.
+- `--align_backend`: Choose `wav2vec2` (default) or `qwen3` for forced alignment.
+- `--align_model`: Specify a custom alignment model. For `qwen3`, the default is `Qwen/Qwen3-ForcedAligner-0.6B`.
+
+### Selecting A Forced-Alignment Backend
+
+Use the default wav2vec2 backend:
+
+```bash
+uv run coherex audio.mp3
+```
+
+Select the Qwen3 backend:
+
+```bash
+uv run coherex audio.mp3 --align_backend qwen3
+```
+
+Select a custom wav2vec2 alignment model:
+
+```bash
+uv run coherex audio.mp3 \
+  --align_backend wav2vec2 \
+  --align_model jonatasgrosman/wav2vec2-large-xlsr-53-portuguese
+```
+
+Select a custom Qwen3 aligner checkpoint or local snapshot:
+
+```bash
+uv run coherex audio.mp3 \
+  --align_backend qwen3 \
+  --align_model Qwen/Qwen3-ForcedAligner-0.6B
+```
+
+Notes:
+- `wav2vec2` remains the default, so you only need `--align_backend` when switching to Qwen3.
+- `qwen3` requires the optional dependency set: `uv sync --extra dev --extra qwen`
+- `qwen3` only supports Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish.
 
 ---
 
@@ -124,12 +163,26 @@ result = model.transcribe(
 
 print(f"Detected Language: {result['language']}")
 
-# 3. Load alignment model and perform forced alignment
-# This requires the language code detected or specified in step 1
-model_a, metadata = coherex.load_align_model(
-    language_code=result["language"], 
-    device="cuda"
-)
+# 3. Select an alignment backend and load the aligner.
+# This requires the language code detected or specified in step 1.
+
+# Default backend: wav2vec2
+model_a, metadata = coherex.load_align_model(language_code=result["language"], device="cuda")
+
+# Qwen3 backend
+# model_a, metadata = coherex.load_align_model(
+#     language_code=result["language"],
+#     device="cuda",
+#     backend="qwen3",
+# )
+
+# Custom backend + custom alignment model
+# model_a, metadata = coherex.load_align_model(
+#     language_code=result["language"],
+#     device="cuda",
+#     backend="wav2vec2",
+#     model_name="jonatasgrosman/wav2vec2-large-xlsr-53-portuguese",
+# )
 
 # Align the transcribed segments to get accurate word-level timestamps
 result = coherex.align(
@@ -161,13 +214,13 @@ CohereX processes audio in a multi-stage pipeline:
 1. **VAD Segmentation:** The audio is chunked into active speech segments using FireRedVAD or Pyannote VAD.
 2. **Language ID:** The language of the segments is computed using our dual-model language identification system.
 3. **Transcription:** The active speech segments are batched and processed by the Cohere ASR model.
-4. **Alignment:** The resulting text is aligned against the audio using a wav2vec2 acoustic model to generate precise word-level timestamps.
+4. **Alignment:** The resulting text is aligned against the audio using either a wav2vec2 acoustic model or the optional Qwen3 forced aligner to generate precise word-level timestamps.
 
 ## Limitations
 
 - **No Diarization:** CohereX does not currently support speaker diarization (identifying "who spoke when").
 - **Compute Requirements:** Running the full pipeline (VAD + ASR + Alignment) requires a GPU with sufficient VRAM, especially for the larger Cohere models.
-- **Alignment Language Support:** Forced alignment relies on the availability of wav2vec2 models for the specific language detected.
+- **Alignment Language Support:** `wav2vec2` alignment depends on the availability of a compatible CTC model for the detected language. `qwen3` alignment currently supports Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish.
 
 ---
 

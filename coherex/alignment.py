@@ -38,6 +38,21 @@ from coherex.log_utils import get_logger
 logger = get_logger(__name__)
 
 LANGUAGES_WITHOUT_SPACES = ["ja", "zh"]
+QWEN3_FORCED_ALIGNER_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B"
+QWEN3_MAX_ALIGN_SECONDS = 300.0
+QWEN3_SUPPORTED_LANGUAGE_NAMES = {
+    "zh": "Chinese",
+    "en": "English",
+    "yue": "Cantonese",
+    "fr": "French",
+    "de": "German",
+    "it": "Italian",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "pt": "Portuguese",
+    "ru": "Russian",
+    "es": "Spanish",
+}
 
 DEFAULT_ALIGN_MODELS_TORCH = {
     "en": "WAV2VEC2_ASR_BASE_960H",
@@ -94,15 +109,246 @@ def _resolve_device(device: Union[str, torch.device], device_index: int = 0) -> 
     return torch.device(device)
 
 
+def _infer_align_backend(model_name: Optional[str], backend: str) -> str:
+    if model_name is not None and "qwen3-forcedaligner" in model_name.lower().replace("_", "-"):
+        return "qwen3"
+    return backend
+
+
+def _qwen_supported_language_codes() -> str:
+    return ", ".join(sorted(QWEN3_SUPPORTED_LANGUAGE_NAMES))
+
+
+def _qwen_language_name(language_code: str) -> str:
+    try:
+        return QWEN3_SUPPORTED_LANGUAGE_NAMES[language_code]
+    except KeyError as exc:
+        raise ValueError(
+            "Qwen3 forced alignment does not support language "
+            f"{language_code!r}. Supported language codes: {_qwen_supported_language_codes()}"
+        ) from exc
+
+
+def _group_segments_for_qwen(
+    transcript: Iterable[SingleSegment],
+    max_chunk_seconds: float = QWEN3_MAX_ALIGN_SECONDS,
+) -> List[List[SingleSegment]]:
+    groups: List[List[SingleSegment]] = []
+    current_group: List[SingleSegment] = []
+    current_start: Optional[float] = None
+
+    for segment in transcript:
+        segment_duration = segment["end"] - segment["start"]
+        if segment_duration > max_chunk_seconds:
+            raise ValueError(
+                "Qwen3 forced alignment only supports chunks up to "
+                f"{max_chunk_seconds:.0f} seconds, but one transcript segment spans "
+                f"{segment_duration:.3f} seconds. Reduce ASR chunking or VAD window size."
+            )
+
+        if not current_group:
+            current_group = [segment]
+            current_start = segment["start"]
+            continue
+
+        assert current_start is not None
+        candidate_duration = segment["end"] - current_start
+        if candidate_duration <= max_chunk_seconds:
+            current_group.append(segment)
+            continue
+
+        groups.append(current_group)
+        current_group = [segment]
+        current_start = segment["start"]
+
+    if current_group:
+        groups.append(current_group)
+
+    return groups
+
+
+def _build_qwen_window_text(segments: List[SingleSegment], model_lang: str) -> str:
+    separator = "" if model_lang in LANGUAGES_WITHOUT_SPACES else " "
+    texts = [segment["text"].strip() for segment in segments if segment["text"].strip()]
+    return separator.join(texts)
+
+
+def _tokenize_qwen_segment(model, text: str, language_name: str) -> List[str]:
+    if not text.strip():
+        return []
+    tokens, _ = model.aligner_processor.encode_timestamp(text, language_name)
+    return tokens
+
+
+def _align_with_qwen3(
+    transcript: Iterable[SingleSegment],
+    model,
+    align_model_metadata: dict,
+    audio: torch.Tensor,
+    return_char_alignments: bool = False,
+) -> AlignedTranscriptionResult:
+    if return_char_alignments:
+        logger.warning(
+            "Qwen3 forced alignment does not expose WhisperX-style character alignments; "
+            "returning empty char lists."
+        )
+
+    model_lang = align_model_metadata["language"]
+    language_name = align_model_metadata["language_name"]
+    max_duration = audio.shape[1] / SAMPLE_RATE
+
+    aligned_segments: List[SingleAlignedSegment] = []
+
+    for group in _group_segments_for_qwen(transcript):
+        group_start = group[0]["start"]
+        group_end = group[-1]["end"]
+
+        if group_start >= max_duration:
+            for segment in group:
+                fallback_segment: SingleAlignedSegment = {
+                    "start": segment["start"],
+                    "end": segment["end"],
+                    "text": segment["text"],
+                    "words": [],
+                    "chars": [] if return_char_alignments else None,
+                }
+                if "avg_logprob" in segment:
+                    fallback_segment["avg_logprob"] = segment["avg_logprob"]
+                aligned_segments.append(fallback_segment)
+            continue
+
+        combined_text = _build_qwen_window_text(group, model_lang)
+        if not combined_text:
+            for segment in group:
+                fallback_segment = {
+                    "start": segment["start"],
+                    "end": segment["end"],
+                    "text": segment["text"],
+                    "words": [],
+                    "chars": [] if return_char_alignments else None,
+                }
+                if "avg_logprob" in segment:
+                    fallback_segment["avg_logprob"] = segment["avg_logprob"]
+                aligned_segments.append(fallback_segment)
+            continue
+
+        f1 = int(group_start * SAMPLE_RATE)
+        f2 = int(min(group_end, max_duration) * SAMPLE_RATE)
+        waveform_segment = audio[:, f1:f2].squeeze(0).cpu().numpy()
+
+        tokenized_segments = [
+            _tokenize_qwen_segment(model, segment["text"], language_name) for segment in group
+        ]
+
+        results = model.align(
+            audio=(waveform_segment, SAMPLE_RATE),
+            text=combined_text,
+            language=language_name,
+        )
+        if len(results) != 1:
+            raise ValueError(
+                f"Expected one Qwen3 alignment result for a single window, got {len(results)}"
+            )
+
+        aligned_items = list(results[0])
+        expected_item_count = sum(len(tokens) for tokens in tokenized_segments)
+        if len(aligned_items) != expected_item_count:
+            logger.warning(
+                "Qwen3 alignment token count mismatch for transcript window %.3f-%.3f; "
+                "expected %d items, got %d. Falling back to original timestamps for that window.",
+                group_start,
+                group_end,
+                expected_item_count,
+                len(aligned_items),
+            )
+            for segment in group:
+                fallback_segment = {
+                    "start": segment["start"],
+                    "end": segment["end"],
+                    "text": segment["text"],
+                    "words": [],
+                    "chars": [] if return_char_alignments else None,
+                }
+                if "avg_logprob" in segment:
+                    fallback_segment["avg_logprob"] = segment["avg_logprob"]
+                aligned_segments.append(fallback_segment)
+            continue
+
+        item_offset = 0
+        for segment, token_list in zip(group, tokenized_segments):
+            word_items = []
+            for item in aligned_items[item_offset:item_offset + len(token_list)]:
+                word_items.append(
+                    {
+                        "word": item.text,
+                        "start": round(item.start_time + group_start, 3),
+                        "end": round(item.end_time + group_start, 3),
+                        "score": 1.0,
+                    }
+                )
+            item_offset += len(token_list)
+
+            aligned_segment: SingleAlignedSegment = {
+                "start": word_items[0]["start"] if word_items else segment["start"],
+                "end": word_items[-1]["end"] if word_items else segment["end"],
+                "text": segment["text"],
+                "words": word_items,
+                "chars": [] if return_char_alignments else None,
+            }
+            if "avg_logprob" in segment:
+                aligned_segment["avg_logprob"] = segment["avg_logprob"]
+            aligned_segments.append(aligned_segment)
+
+    word_segments: List[SingleWordSegment] = []
+    for segment in aligned_segments:
+        word_segments += segment["words"]
+
+    return {"segments": aligned_segments, "word_segments": word_segments}
+
+
 def load_align_model(
     language_code: str,
     device: Union[str, torch.device],
     model_name: Optional[str] = None,
+    backend: str = "wav2vec2",
     model_dir=None,
     model_cache_only: bool = False,
     device_index: int = 0,
 ):
     resolved_device = _resolve_device(device, device_index=device_index)
+    backend = _infer_align_backend(model_name=model_name, backend=backend)
+
+    if backend == "qwen3":
+        language_name = _qwen_language_name(language_code)
+        if model_name is None:
+            model_name = QWEN3_FORCED_ALIGNER_MODEL
+
+        try:
+            from qwen_asr import Qwen3ForcedAligner
+        except ImportError as exc:
+            raise ImportError(
+                "Qwen3 forced alignment requires the optional `qwen-asr` package. "
+                "Install it with `pip install qwen-asr`, `uv pip install qwen-asr`, "
+                "or sync the project with `uv sync --extra qwen`."
+            ) from exc
+
+        align_model = Qwen3ForcedAligner.from_pretrained(
+            model_name,
+            cache_dir=model_dir,
+            local_files_only=model_cache_only,
+            device_map=str(resolved_device),
+        )
+        align_metadata = {
+            "language": language_code,
+            "language_name": language_name,
+            "dictionary": None,
+            "type": "qwen3",
+        }
+        return align_model, align_metadata
+
+    if backend != "wav2vec2":
+        raise ValueError(f"Unsupported alignment backend: {backend}")
+
     if model_name is None:
         # use default model
         if language_code in DEFAULT_ALIGN_MODELS_TORCH:
@@ -163,6 +409,15 @@ def align(
     if len(audio.shape) == 1:
         audio = audio.unsqueeze(0)
     resolved_device = _resolve_device(device, device_index=device_index)
+
+    if align_model_metadata["type"] == "qwen3":
+        return _align_with_qwen3(
+            transcript=transcript,
+            model=model,
+            align_model_metadata=align_model_metadata,
+            audio=audio,
+            return_char_alignments=return_char_alignments,
+        )
 
     MAX_DURATION = audio.shape[1] / SAMPLE_RATE
 

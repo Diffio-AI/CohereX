@@ -28,6 +28,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
     os.makedirs(output_dir, exist_ok=True)
 
     align_model_name: str = args.pop("align_model")
+    align_backend: str = args.pop("align_backend")
     interpolate_method: str = args.pop("interpolate_method")
     no_align: bool = args.pop("no_align")
     return_char_alignments: bool = args.pop("return_char_alignments")
@@ -105,6 +106,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
             align_language,
             device,
             model_name=align_model_name,
+            backend=align_backend,
             model_dir=model_dir,
             model_cache_only=model_cache_only,
             device_index=device_index,
@@ -122,6 +124,7 @@ def transcribe_task(args: dict, parser: argparse.ArgumentParser):
                         result["language"],
                         device,
                         model_name=align_model_name,
+                        backend=align_backend,
                         model_dir=model_dir,
                         model_cache_only=model_cache_only,
                         device_index=device_index,

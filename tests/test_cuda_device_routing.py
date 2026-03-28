@@ -41,6 +41,7 @@ def test_transcribe_task_passes_device_index_to_alignment(monkeypatch, tmp_path)
                 "language_code": language_code,
                 "device": device,
                 "device_index": kwargs.get("device_index"),
+                "backend": kwargs.get("backend"),
             }
         )
         return object(), {"language": language_code, "dictionary": {}, "type": "torchaudio"}
@@ -75,6 +76,7 @@ def test_transcribe_task_passes_device_index_to_alignment(monkeypatch, tmp_path)
         "compute_type": "default",
         "verbose": False,
         "align_model": None,
+        "align_backend": "qwen3",
         "interpolate_method": "nearest",
         "no_align": False,
         "return_char_alignments": False,
@@ -102,7 +104,7 @@ def test_transcribe_task_passes_device_index_to_alignment(monkeypatch, tmp_path)
     transcribe_task(args, argparse.ArgumentParser())
 
     assert calls["load_align_model"] == [
-        {"language_code": "en", "device": "cuda", "device_index": 1}
+        {"language_code": "en", "device": "cuda", "device_index": 1, "backend": "qwen3"}
     ]
     assert calls["align"] == [
         {"device": "cuda", "device_index": 1}
