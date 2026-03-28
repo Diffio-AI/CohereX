@@ -1,4 +1,5 @@
 import os
+import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Text, Union
 
@@ -22,6 +23,10 @@ class SegmentX:
 
 
 def load_vad_model(device, vad_onset=0.500, vad_offset=0.363, token=None, model_fp=None):
+    sys.modules.setdefault("torchcodec", None)
+    for module_name in ("tensorflow", "tensorflow_text", "keras"):
+        if sys.modules.get(module_name) is None:
+            sys.modules.pop(module_name, None)
     from pyannote.audio import Model
 
     model_dir = torch.hub._get_torch_home()

@@ -1,0 +1,29 @@
+{
+  "source": "whisperx-pyannote",
+  "audio": "david-gooding-noisy.mp3",
+  "vad_onset": 0.5,
+  "vad_offset": 0.363,
+  "chunk_size": 30,
+  "segments": [
+    {
+      "start": 0.03096875,
+      "end": 15.04971875,
+      "segments": [
+        [
+          0.03096875,
+          15.04971875
+        ]
+      ]
+    },
+    {
+      "start": 16.53471875,
+      "end": 30.11909375,
+      "segments": [
+        [
+          16.53471875,
+          30.11909375
+        ]
+      ]
+    }
+  ]
+}
