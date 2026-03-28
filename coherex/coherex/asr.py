@@ -20,6 +20,7 @@ from coherex.configuration_cohere_asr import CohereAsrConfig
 from coherex.log_utils import get_logger
 from coherex.modeling_cohere_asr import (
     CohereAsrForConditionalGeneration,
+    _batched_indices,
     get_chunk_separator,
     split_audio_chunks_energy,
 )
@@ -192,6 +193,7 @@ class CohereTranscriptionPipeline:
         punctuation: bool,
         suppress_numerals: bool,
         max_new_tokens: int,
+        batch_size: int,
     ):
         self.model = model
         self.processor = processor
@@ -202,6 +204,7 @@ class CohereTranscriptionPipeline:
         self.punctuation = punctuation
         self.suppress_numerals = suppress_numerals
         self.max_new_tokens = max_new_tokens
+        self._batch_size = batch_size
         self._suppressed_tokens = (
             find_numeral_symbol_tokens(self.tokenizer) if suppress_numerals else []
         )
@@ -246,7 +249,7 @@ class CohereTranscriptionPipeline:
 
         texts = self._transcribe_chunks(
             chunks=chunks,
-            batch_size=batch_size or int(self.model.config.batch_size),
+            batch_size=batch_size or self._batch_size,
             print_progress=print_progress,
             progress_callback=progress_callback,
         )
@@ -276,6 +279,8 @@ class CohereTranscriptionPipeline:
         print_progress: bool,
         progress_callback: ProgressCallback,
     ) -> List[str]:
+        if batch_size <= 0:
+            raise ValueError(f"batch_size must be > 0, got {batch_size}")
         if not chunks:
             return []
 
@@ -288,11 +293,9 @@ class CohereTranscriptionPipeline:
         if self._suppressed_tokens:
             logits_processor.append(SuppressTokensLogitsProcessor(self._suppressed_tokens))
 
-        total_batches = (len(ordered_indices) + batch_size - 1) // batch_size
-        for batch_idx in range(total_batches):
-            start = batch_idx * batch_size
-            stop = min(start + batch_size, len(ordered_indices))
-            batch_indices = ordered_indices[start:stop]
+        total_chunks = len(ordered_indices)
+        for batch_order_indices in _batched_indices(total_chunks, batch_size):
+            batch_indices = [ordered_indices[idx] for idx in batch_order_indices]
             batch_waves = [chunks[i].audio for i in batch_indices]
             inputs = self.processor(
                 audio=batch_waves,
@@ -337,7 +340,7 @@ class CohereTranscriptionPipeline:
             for row_idx, text in enumerate(batch_texts):
                 transcriptions[batch_indices[row_idx]] = text.strip()
 
-            progress = ((batch_idx + 1) / total_batches) * 100
+            progress = (batch_order_indices[-1] + 1) / total_chunks * 100
             if print_progress:
                 print(f"Progress: {progress:.2f}%...")
             if progress_callback is not None:
@@ -433,4 +436,5 @@ def load_model(
         punctuation=default_asr_options["punctuation"],
         suppress_numerals=default_asr_options["suppress_numerals"],
         max_new_tokens=int(default_asr_options["max_new_tokens"]),
+        batch_size=int(config.batch_size),
     )
