@@ -9,7 +9,7 @@ sys.modules.setdefault("keras", None)
 
 import torch
 
-from coherex.configuration_cohere_asr import DEFAULT_SUPPORTED_LANGUAGES
+from coherex.configuration_cohere_asr import normalize_language_code, supported_languages_help_text
 from coherex.log_utils import setup_logging
 from coherex.utils import optional_int, str2bool
 
@@ -19,6 +19,13 @@ def _package_version() -> str:
         return importlib.metadata.version("coherex")
     except importlib.metadata.PackageNotFoundError:
         return "0.1.0"
+
+
+def _parse_language(value: str) -> str:
+    try:
+        return normalize_language_code(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def cli():
@@ -31,7 +38,13 @@ def cli():
     parser.add_argument("--device_index", default=0, type=int, help="device index to use for CUDA inference")
     parser.add_argument("--batch_size", default=8, type=int, help="preferred batch size for inference")
     parser.add_argument("--compute_type", default="default", type=str, choices=["default", "float16", "bfloat16", "float32"], help="compute type for inference")
-    parser.add_argument("--language", required=True, type=str, choices=sorted(DEFAULT_SUPPORTED_LANGUAGES), help="language spoken in the audio")
+    parser.add_argument(
+        "--language",
+        required=True,
+        type=_parse_language,
+        metavar="LANGUAGE",
+        help="language spoken in the audio. Supported languages:\n" + supported_languages_help_text(),
+    )
 
     parser.add_argument("--output_dir", "-o", type=str, default=".", help="directory to save the outputs")
     parser.add_argument("--output_format", "-f", type=str, default="all", choices=["all", "srt", "vtt", "txt", "tsv", "json"], help="format of the output file")

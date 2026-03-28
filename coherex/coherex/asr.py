@@ -16,7 +16,7 @@ import torch
 from transformers.generation.logits_process import LogitsProcessorList, SuppressTokensLogitsProcessor
 
 from coherex.audio import SAMPLE_RATE, load_audio
-from coherex.configuration_cohere_asr import CohereAsrConfig
+from coherex.configuration_cohere_asr import CohereAsrConfig, normalize_language_code
 from coherex.log_utils import get_logger
 from coherex.modeling_cohere_asr import (
     CohereAsrForConditionalGeneration,
@@ -370,8 +370,7 @@ def load_model(
     use_auth_token: Optional[Union[str, bool]] = None,
     asr_options: Optional[dict] = None,
 ) -> CohereTranscriptionPipeline:
-    if language is None:
-        raise ValueError("language is required for CohereX")
+    language = normalize_language_code(language)
 
     torch_device = _resolve_device(device, device_index)
     torch_dtype = _resolve_dtype(compute_type, torch_device)

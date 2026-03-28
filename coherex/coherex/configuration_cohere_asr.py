@@ -1,8 +1,93 @@
 import torch
+import re
 from transformers import PretrainedConfig
 
 DEFAULT_SUPPORTED_LANGUAGES = ["ar", "de", "el", "en", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "vi", "zh"]
 NO_SPACE_LANGS = {"ja", "zh"}
+SUPPORTED_LANGUAGE_GROUPS = {
+    "European": [
+        ("en", "English"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("it", "Italian"),
+        ("es", "Spanish"),
+        ("pt", "Portuguese"),
+        ("el", "Greek"),
+        ("nl", "Dutch"),
+        ("pl", "Polish"),
+    ],
+    "APAC": [
+        ("zh", "Chinese (Mandarin)"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("vi", "Vietnamese"),
+    ],
+    "MENA": [
+        ("ar", "Arabic"),
+    ],
+}
+
+SUPPORTED_LANGUAGE_ALIASES = {
+    "arabic": "ar",
+    "ar": "ar",
+    "chinese": "zh",
+    "chinese mandarin": "zh",
+    "mandarin": "zh",
+    "mandarin chinese": "zh",
+    "zh": "zh",
+    "dutch": "nl",
+    "nl": "nl",
+    "english": "en",
+    "en": "en",
+    "french": "fr",
+    "fr": "fr",
+    "german": "de",
+    "de": "de",
+    "greek": "el",
+    "el": "el",
+    "italian": "it",
+    "it": "it",
+    "japanese": "ja",
+    "ja": "ja",
+    "korean": "ko",
+    "ko": "ko",
+    "polish": "pl",
+    "pl": "pl",
+    "portuguese": "pt",
+    "pt": "pt",
+    "spanish": "es",
+    "es": "es",
+    "vietnamese": "vi",
+    "vi": "vi",
+}
+
+
+def supported_languages_help_text() -> str:
+    lines = []
+    for region, languages in SUPPORTED_LANGUAGE_GROUPS.items():
+        items = ", ".join(f"{name} (`{code}`)" for code, name in languages)
+        lines.append(f"{region}: {items}")
+    return "\n".join(lines)
+
+
+def normalize_language_code(language: str) -> str:
+    if language is None or not str(language).strip():
+        raise ValueError(
+            "language is required. Supported languages:\n"
+            f"{supported_languages_help_text()}"
+        )
+
+    normalized = str(language).strip().lower()
+    normalized = normalized.replace("_", " ").replace("-", " ")
+    normalized = re.sub(r"[^a-z0-9 ]+", " ", normalized)
+    normalized = " ".join(normalized.split())
+    code = SUPPORTED_LANGUAGE_ALIASES.get(normalized)
+    if code is None:
+        raise ValueError(
+            f"Unsupported language: {language!r}. Supported languages:\n"
+            f"{supported_languages_help_text()}"
+        )
+    return code
 
 
 class CohereAsrConfig(PretrainedConfig):
