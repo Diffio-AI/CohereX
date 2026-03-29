@@ -50,6 +50,10 @@ We proudly support **FireRedVAD**, an open-source, highly robust VAD model that 
 
 Like WhisperX, CohereX achieves highly accurate word-level timestamps by performing forced alignment after the initial transcription. By default we use wav2vec2 models to align the generated text with the original audio, and we also support `Qwen/Qwen3-ForcedAligner-0.6B` plus a `nemo_conformer_ctc` backend that defaults to `nvidia/stt_en_conformer_ctc_large`. The Qwen backend is limited to Chinese, English, Cantonese, French, German, Italian, Japanese, Korean, Portuguese, Russian, and Spanish, so CohereX will raise an error if Qwen alignment is requested for another detected language. The NeMo backend currently provides an English default and requires `--align_model` for other languages.
 
+On **100 TIMIT test utterances** (829 reference words, full word coverage at every condition), we measured mean absolute error on word **start** and **end** times after mixing controlled Gaussian noise. **Qwen3** reaches the lowest error on clean and high-SNR audio (about **29 ms** mean start/end MAE on clean). **wav2vec2** is close behind in those regimes (about **45 ms** clean) and stays competitive around 0 dB SNR. **NeMo Conformer CTC** is slightly worse on clean speech (about **68 ms**) but degrades more gracefully as SNR drops: near **−20 dB** its mean MAE is on the order of **0.23 s** per boundary versus about **0.34 s** for wav2vec2 and **0.55 s** for Qwen3 at the same noise level. At **−40 dB**, NeMo remains the most stable of the three (about **0.32 s** global mean MAE vs. **0.40 s** wav2vec2 and **0.69 s** Qwen3). Wall time per utterance on this setup was roughly **23–25 ms** (Qwen3), **33–40 ms** (wav2vec2), and **47–53 ms** (NeMo on CUDA).
+
+![TIMIT forced alignment: word boundary MAE vs. SNR (wav2vec2, Qwen3, NeMo)](images/timit_force_alignment_inset_n100_cuda1_snr_curve.png)
+
 ## Language Identification
 
 CohereX includes a robust language identification step before transcription. We utilize two specialized language ID models to accurately compute and determine the spoken language in the audio segment. This ensures the Cohere ASR model is conditioned correctly for optimal transcription accuracy.
@@ -268,7 +272,7 @@ print(result["segments"])
 After changing `coherex`, run the required regression suite:
 
 ```bash
-PYTHONPATH=. COHEREX_TEST_DEVICE=cpu python -m pytest -q tests/test_regression_transcripts.py tests/test_regression_word_alignment.py
+COHEREX_TEST_DEVICE=cpu python -m pytest -q tests/test_regression_transcripts.py tests/test_regression_word_alignment.py
 ```
 
 ---
