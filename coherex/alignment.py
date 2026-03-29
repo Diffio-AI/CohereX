@@ -5,7 +5,6 @@ C. Max Bain
 import os
 import sys
 import tempfile
-import warnings
 from dataclasses import dataclass
 from typing import Iterable, Optional, Union, List
 
@@ -59,23 +58,11 @@ QWEN3_SUPPORTED_LANGUAGE_NAMES = {
 SUPPORTED_ALIGN_BACKENDS = (
     "wav2vec2",
     "qwen3",
-    "nemo_ctc_or_hybrid",
     "nemo_conformer_ctc",
 )
-ALIGN_BACKEND_ALIASES = {
-    "nemo": "nemo_ctc_or_hybrid",
-    "nemo_conformer": "nemo_conformer_ctc",
-}
-
-NEMO_CTC_OR_HYBRID_DEFAULT_ALIGN_MODELS = {
-    "en": "stt_en_fastconformer_hybrid_large_pc",
-}
 NEMO_CONFORMER_CTC_DEFAULT_ALIGN_MODELS = {
     "en": "nvidia/stt_en_conformer_ctc_large",
 }
-# Backward-compatible aliases for older public constant names.
-NEMO_DEFAULT_ALIGN_MODELS = NEMO_CTC_OR_HYBRID_DEFAULT_ALIGN_MODELS
-NEMO_CONFORMER_DEFAULT_ALIGN_MODELS = NEMO_CONFORMER_CTC_DEFAULT_ALIGN_MODELS
 
 DEFAULT_ALIGN_MODELS_TORCH = {
     "en": "WAV2VEC2_ASR_BASE_960H",
@@ -151,14 +138,6 @@ def _infer_align_backend(model_name: Optional[str], backend: str) -> str:
 
 def _normalize_align_backend(backend: str) -> str:
     normalized_backend = backend.lower()
-    if normalized_backend in ALIGN_BACKEND_ALIASES:
-        canonical_backend = ALIGN_BACKEND_ALIASES[normalized_backend]
-        warnings.warn(
-            f"`{backend}` is deprecated; use `{canonical_backend}` instead.",
-            DeprecationWarning,
-            stacklevel=3,
-        )
-        return canonical_backend
     if normalized_backend in SUPPORTED_ALIGN_BACKENDS:
         return normalized_backend
     return backend
@@ -166,31 +145,18 @@ def _normalize_align_backend(backend: str) -> str:
 
 def _load_nemo_align_backend(
     *,
-    backend: str,
     language_code: str,
     model_name: Optional[str],
     resolved_device: torch.device,
     model_cache_only: bool,
 ):
-    default_models = {
-        "nemo_ctc_or_hybrid": NEMO_CTC_OR_HYBRID_DEFAULT_ALIGN_MODELS,
-        "nemo_conformer_ctc": NEMO_CONFORMER_CTC_DEFAULT_ALIGN_MODELS,
-    }
-    backend_display_name = {
-        "nemo_ctc_or_hybrid": "NeMo CTC/Hybrid",
-        "nemo_conformer_ctc": "NeMo Conformer CTC",
-    }
-
-    if backend not in default_models:
-        raise ValueError(f"Unsupported NeMo alignment backend: {backend}")
-
     if model_name is None:
-        if language_code not in default_models[backend]:
+        if language_code not in NEMO_CONFORMER_CTC_DEFAULT_ALIGN_MODELS:
             raise ValueError(
-                f"No default {backend_display_name[backend]} align-model for language: "
-                f"{language_code}. Pass a NeMo CTC or hybrid CTC checkpoint via --align_model."
+                "No default NeMo Conformer CTC align-model for language: "
+                f"{language_code}. Pass a NeMo Conformer CTC checkpoint via --align_model."
             )
-        model_name = default_models[backend][language_code]
+        model_name = NEMO_CONFORMER_CTC_DEFAULT_ALIGN_MODELS[language_code]
 
     if model_cache_only and not os.path.exists(model_name):
         raise ValueError(
@@ -405,7 +371,6 @@ def _load_nemo_align_model(
     try:
         from omegaconf import OmegaConf
         from nemo.collections.asr.models.ctc_models import EncDecCTCModel
-        from nemo.collections.asr.models.hybrid_rnnt_ctc_models import EncDecHybridRNNTCTCModel
         from nemo.collections.asr.parts.utils.transcribe_utils import setup_model
     except ImportError as exc:
         raise ImportError(
@@ -424,9 +389,6 @@ def _load_nemo_align_model(
     align_model, _ = setup_model(cfg, resolved_device)
     align_model.eval()
 
-    if isinstance(align_model, EncDecHybridRNNTCTCModel):
-        align_model.change_decoding_strategy(decoder_type="ctc")
-
     if hasattr(align_model, "change_attention_model"):
         try:
             align_model.change_attention_model(
@@ -436,10 +398,9 @@ def _load_nemo_align_model(
         except Exception:
             logger.debug("Failed to switch NeMo aligner to local attention; continuing with model defaults.")
 
-    if not isinstance(align_model, (EncDecCTCModel, EncDecHybridRNNTCTCModel)):
+    if not isinstance(align_model, EncDecCTCModel):
         raise NotImplementedError(
-            "NeMo forced alignment currently supports only EncDecCTCModel and "
-            "EncDecHybridRNNTCTCModel checkpoints."
+            "NeMo forced alignment currently supports only EncDecCTCModel checkpoints."
         )
 
     return align_model
@@ -658,9 +619,8 @@ def load_align_model(
         }
         return align_model, align_metadata
 
-    if backend in {"nemo_ctc_or_hybrid", "nemo_conformer_ctc"}:
+    if backend == "nemo_conformer_ctc":
         return _load_nemo_align_backend(
-            backend=backend,
             language_code=language_code,
             model_name=model_name,
             resolved_device=resolved_device,

@@ -3,7 +3,6 @@ import pytest
 
 from coherex.alignment import (
     NEMO_CONFORMER_CTC_DEFAULT_ALIGN_MODELS,
-    NEMO_CTC_OR_HYBRID_DEFAULT_ALIGN_MODELS,
     align,
     load_align_model,
 )
@@ -25,28 +24,6 @@ class _FakeSegment:
 class _FakeUtterance:
     def __init__(self, words):
         self.segments_and_tokens = [_FakeSegment(words)]
-
-
-def test_load_align_model_nemo_ctc_or_hybrid_backend(monkeypatch):
-    calls = []
-
-    def fake_loader(model_name, resolved_device):
-        calls.append((model_name, str(resolved_device)))
-        return object()
-
-    monkeypatch.setattr("coherex.alignment._load_nemo_align_model", fake_loader)
-
-    model, metadata = load_align_model("en", "cpu", backend="nemo_ctc_or_hybrid")
-
-    assert model is not None
-    assert metadata == {
-        "language": "en",
-        "dictionary": None,
-        "type": "nemo",
-        "batch_size": 1,
-        "model_name": NEMO_CTC_OR_HYBRID_DEFAULT_ALIGN_MODELS["en"],
-    }
-    assert calls == [(NEMO_CTC_OR_HYBRID_DEFAULT_ALIGN_MODELS["en"], "cpu")]
 
 
 def test_load_align_model_nemo_conformer_ctc_backend(monkeypatch):
@@ -96,45 +73,12 @@ def test_load_align_model_infers_nemo_conformer_ctc_from_model_name(monkeypatch)
 @pytest.mark.parametrize(
     ("backend", "error_message"),
     [
-        ("nemo_ctc_or_hybrid", "No default NeMo CTC/Hybrid align-model"),
         ("nemo_conformer_ctc", "No default NeMo Conformer CTC align-model"),
     ],
 )
 def test_load_align_model_nemo_backends_require_model_for_non_default_language(backend, error_message):
     with pytest.raises(ValueError, match=error_message):
         load_align_model("fr", "cpu", backend=backend)
-
-
-@pytest.mark.parametrize(
-    ("legacy_backend", "canonical_backend"),
-    [
-        ("nemo", "nemo_ctc_or_hybrid"),
-        ("nemo_conformer", "nemo_conformer_ctc"),
-    ],
-)
-def test_load_align_model_accepts_legacy_nemo_backend_aliases(
-    monkeypatch,
-    legacy_backend,
-    canonical_backend,
-):
-    calls = []
-
-    def fake_loader(model_name, resolved_device):
-        calls.append((model_name, str(resolved_device)))
-        return object()
-
-    monkeypatch.setattr("coherex.alignment._load_nemo_align_model", fake_loader)
-
-    with pytest.deprecated_call():
-        model, metadata = load_align_model("en", "cpu", backend=legacy_backend)
-
-    assert model is not None
-    expected_model_name = {
-        "nemo_ctc_or_hybrid": NEMO_CTC_OR_HYBRID_DEFAULT_ALIGN_MODELS["en"],
-        "nemo_conformer_ctc": NEMO_CONFORMER_CTC_DEFAULT_ALIGN_MODELS["en"],
-    }[canonical_backend]
-    assert metadata["model_name"] == expected_model_name
-    assert calls == [(expected_model_name, "cpu")]
 
 
 def test_align_with_nemo_preserves_segment_order(monkeypatch):
@@ -190,7 +134,7 @@ def test_align_with_nemo_preserves_segment_order(monkeypatch):
             "dictionary": None,
             "type": "nemo",
             "batch_size": 2,
-            "model_name": NEMO_CTC_OR_HYBRID_DEFAULT_ALIGN_MODELS["en"],
+            "model_name": NEMO_CONFORMER_CTC_DEFAULT_ALIGN_MODELS["en"],
         },
         audio=audio,
         device="cpu",
